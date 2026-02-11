@@ -1026,7 +1026,7 @@ function render() {
   let html = '';
 
   // Progress bar
-  const steps = ['basic', 'ohca_check', 'incident_type', 'detail_questions', 'summary'];
+  const steps = ['basic', 'ohca_check', 'ohca_detail', 'incident_type', 'detail_questions', 'summary'];
   const currentIdx = steps.indexOf(state.step);
   const progress = state.step === 'summary' ? 100 : Math.max(10, ((currentIdx + 1) / steps.length) * 100);
   html += `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>`;
@@ -1038,6 +1038,7 @@ function render() {
   switch (state.step) {
     case 'basic': html += renderBasicInfo(); break;
     case 'ohca_check': html += renderOHCACheck(); break;
+    case 'ohca_detail': html += renderOHCADetail(); break;
     case 'incident_type': html += renderIncidentType(); break;
     case 'detail_questions': html += renderDetailQuestions(); break;
     case 'summary': html += renderSummary(); break;
@@ -1141,13 +1142,130 @@ function handleOHCAYes() {
   state.vehicles.ambulance = 2;
   addFinding('患者 OHCA');
   addLog('是否 OHCA', '是 → 立即派遣雙車');
-  state.step = 'summary';
+  state.subAnswers.ohcaDetailStep = 0;
+  state.step = 'ohca_detail';
   render();
 }
 
 function handleOHCANo() {
   addLog('是否 OHCA', '否');
   state.step = 'incident_type';
+  render();
+}
+
+function renderOHCADetail() {
+  const step = state.subAnswers.ohcaDetailStep || 0;
+
+  let html = `
+    <div class="card completed">
+      <div class="card-header"><div class="card-title">📋 基本資訊 → OHCA 確認 ✓</div></div>
+    </div>
+  `;
+
+  // Show completed answers
+  const ohcaLog = state.log.filter(l => ['患者性別', '患者年紀', '是否受困'].includes(l.q));
+  if (ohcaLog.length > 0) {
+    html += `<div class="card" style="padding:16px">
+      <div style="font-size:14px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">📝 已記錄的回答</div>
+      ${ohcaLog.map(l => `
+        <div class="log-entry">
+          <span class="q">${l.q}</span>
+          <span class="a">${l.a}</span>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+
+  if (step === 0) {
+    // Gender
+    html += `
+      <div class="card">
+        <div class="card-step">OHCA 補充資訊 (1/3)</div>
+        <div class="card-title">👤 患者性別？</div>
+        <div class="choice-grid">
+          <button class="choice-btn" onclick="ohcaDetailSelect('gender', '男')">
+            <span class="choice-icon">♂️</span>
+            <div class="choice-text"><div>男性</div></div>
+          </button>
+          <button class="choice-btn" onclick="ohcaDetailSelect('gender', '女')">
+            <span class="choice-icon">♀️</span>
+            <div class="choice-text"><div>女性</div></div>
+          </button>
+          <button class="choice-btn" onclick="ohcaDetailSelect('gender', '不詳')">
+            <span class="choice-icon">❓</span>
+            <div class="choice-text"><div>不詳</div></div>
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (step === 1) {
+    // Age
+    html += `
+      <div class="card">
+        <div class="card-step">OHCA 補充資訊 (2/3)</div>
+        <div class="card-title">🎂 患者年紀？</div>
+        <div class="card-hint">💡 請輸入年齡或描述（如：老年人、小孩約5歲）</div>
+        <div class="form-group">
+          <input class="form-input" id="ohcaAgeInput" type="text" placeholder="例如: 45歲、老年、小孩約5歲"
+                 onkeypress="if(event.key==='Enter')ohcaDetailSubmitAge()">
+        </div>
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="ohcaDetailSubmitAge()">確認 →</button>
+          <button class="btn" style="background:var(--gray-200);color:var(--gray-700)" onclick="ohcaDetailSubmitAge(true)">跳過 →</button>
+        </div>
+      </div>
+    `;
+  } else if (step === 2) {
+    // Trapped
+    html += `
+      <div class="card">
+        <div class="card-step">OHCA 補充資訊 (3/3)</div>
+        <div class="card-title">🚧 患者是否有受困或卡住？</div>
+        <div class="card-hint">💡 例如：卡在車內、受困瓦礫中、無法自行脫困等</div>
+        <div class="yn-grid">
+          <button class="yn-btn yes-btn" onclick="ohcaDetailTrapped(true)">✅ 是</button>
+          <button class="yn-btn no-btn" onclick="ohcaDetailTrapped(false)">❌ 否 / 不確定</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
+function ohcaDetailSelect(field, value) {
+  if (field === 'gender') {
+    state.gender = value;
+    addLog('患者性別', value);
+    state.subAnswers.ohcaDetailStep = 1;
+    render();
+  }
+}
+
+function ohcaDetailSubmitAge(skip) {
+  if (skip) {
+    state.age = '不詳';
+    addLog('患者年紀', '不詳（跳過）');
+  } else {
+    const input = document.getElementById('ohcaAgeInput');
+    const v = input ? input.value.trim() : '';
+    if (!v) { alert('請輸入患者年紀'); return; }
+    state.age = v;
+    addLog('患者年紀', v);
+  }
+  state.subAnswers.ohcaDetailStep = 2;
+  render();
+}
+
+function ohcaDetailTrapped(yes) {
+  if (yes) {
+    addFinding('患者受困，需搜救器材');
+    addVehicle('rescue');
+    addLog('是否受困', '是 → 加派救災車');
+  } else {
+    addLog('是否受困', '否');
+  }
+  state.step = 'summary';
   render();
 }
 
