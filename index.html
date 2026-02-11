@@ -1,0 +1,1557 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重大外傷派遣決策輔助系統</title>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-light: #e8eefb;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --danger-bg: #fde8e8;
+    --success: #16a34a;
+    --success-light: #f0fdf4;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-500: #6b7280;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "微軟正黑體", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8eefb 100%);
+    min-height: 100vh;
+    color: var(--gray-800);
+    line-height: 1.6;
+  }
+
+  .app-header {
+    background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+    color: white;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 12px rgba(26,86,219,0.3);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .app-header h1 { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  .app-header .subtitle { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+
+  .header-actions { display: flex; gap: 8px; }
+
+  .header-btn {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+  .header-btn:hover { background: rgba(255,255,255,0.25); }
+
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px 16px 100px;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    background: var(--gray-200);
+    border-radius: 20px;
+    height: 8px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #3b82f6);
+    border-radius: 20px;
+    transition: width 0.5s ease;
+  }
+
+  /* Dispatch status banner */
+  .dispatch-banner {
+    padding: 16px 20px;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+    font-size: 16px;
+    transition: all 0.3s;
+    box-shadow: var(--shadow);
+  }
+  .dispatch-banner.level-normal { background: var(--success-light); color: var(--success); border: 2px solid var(--success); }
+  .dispatch-banner.level-warning { background: var(--warning-light); color: var(--warning); border: 2px solid var(--warning); }
+  .dispatch-banner.level-critical { background: var(--danger-bg); color: var(--danger); border: 2px solid var(--danger); animation: pulse 2s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(220,38,38,0); }
+  }
+
+  .dispatch-banner .icon { font-size: 28px; }
+  .dispatch-banner .details { flex: 1; }
+  .dispatch-banner .details .label { font-size: 12px; opacity: 0.8; font-weight: 400; }
+
+  /* Card styles */
+  .card {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px;
+    margin-bottom: 16px;
+    border: 1px solid var(--gray-200);
+    animation: fadeInUp 0.35s ease;
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card.completed {
+    opacity: 0.65;
+    border-color: var(--success);
+    background: var(--success-light);
+  }
+  .card.completed .card-title::after {
+    content: ' ✓';
+    color: var(--success);
+  }
+
+  .card-step {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .card-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: 6px;
+  }
+
+  .card-desc {
+    font-size: 14px;
+    color: var(--gray-500);
+    margin-bottom: 16px;
+  }
+
+  .card-hint {
+    background: var(--warning-light);
+    border-left: 4px solid var(--warning);
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px;
+    color: var(--gray-700);
+    margin-bottom: 16px;
+  }
+
+  /* Form elements */
+  .form-group { margin-bottom: 16px; }
+  .form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 6px;
+  }
+
+  .form-input, .form-select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--gray-200);
+    border-radius: 8px;
+    font-size: 16px;
+    font-family: inherit;
+    transition: border-color 0.2s;
+    background: white;
+  }
+  .form-input:focus, .form-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.15);
+  }
+
+  /* Big choice buttons */
+  .choice-grid { display: flex; flex-direction: column; gap: 10px; }
+
+  .choice-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    border: 2px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: white;
+    cursor: pointer;
+    font-size: 16px;
+    font-family: inherit;
+    color: var(--gray-800);
+    transition: all 0.2s;
+    text-align: left;
+    width: 100%;
+  }
+  .choice-btn:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+  }
+  .choice-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    font-weight: 600;
+  }
+  .choice-btn .choice-icon { font-size: 28px; min-width: 36px; text-align: center; }
+  .choice-btn .choice-text .sub { font-size: 12px; color: var(--gray-500); font-weight: 400; }
+
+  .choice-btn.danger-choice {
+    border-color: var(--danger);
+    background: var(--danger-light);
+    color: var(--danger);
+    font-weight: 600;
+  }
+  .choice-btn.danger-choice:hover {
+    background: var(--danger-bg);
+  }
+
+  /* Yes/No buttons */
+  .yn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .yn-btn {
+    padding: 16px;
+    border: 2px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: white;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 700;
+    font-family: inherit;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .yn-btn.yes-btn:hover, .yn-btn.yes-btn.selected { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+  .yn-btn.no-btn:hover, .yn-btn.no-btn.selected { background: var(--success-light); border-color: var(--success); color: var(--success); }
+
+  /* Action buttons */
+  .action-row { display: flex; gap: 10px; margin-top: 16px; }
+
+  .btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    flex: 1;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: #1e40af; }
+  .btn-primary:disabled { background: var(--gray-300); cursor: not-allowed; }
+  .btn-secondary { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-secondary:hover { background: var(--gray-200); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-danger:hover { background: #b91c1c; }
+
+  /* Summary */
+  .summary-section {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 28px;
+    margin-bottom: 16px;
+    border: 2px solid var(--primary);
+  }
+
+  .summary-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 20px;
+    text-align: center;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--gray-200);
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .summary-item {
+    padding: 12px;
+    background: var(--gray-50);
+    border-radius: 8px;
+  }
+  .summary-item .s-label { font-size: 12px; color: var(--gray-500); font-weight: 600; }
+  .summary-item .s-value { font-size: 16px; font-weight: 600; color: var(--gray-800); }
+
+  .dispatch-result {
+    padding: 20px;
+    border-radius: var(--radius);
+    text-align: center;
+    margin-top: 16px;
+  }
+  .dispatch-result.major {
+    background: linear-gradient(135deg, #fef2f2, #fde8e8);
+    border: 3px solid var(--danger);
+  }
+  .dispatch-result.normal {
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border: 3px solid var(--success);
+  }
+  .dispatch-result .dr-title {
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .dispatch-result.major .dr-title { color: var(--danger); }
+  .dispatch-result.normal .dr-title { color: var(--success); }
+  .dispatch-result .dr-vehicles {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 10px;
+  }
+
+  .key-findings {
+    background: var(--warning-light);
+    border: 2px solid var(--warning);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-top: 16px;
+  }
+  .key-findings h4 { color: var(--warning); margin-bottom: 8px; }
+  .key-findings ul { padding-left: 20px; }
+  .key-findings li { margin-bottom: 4px; font-size: 14px; }
+
+  /* History log */
+  .log-entry {
+    padding: 8px 12px;
+    background: var(--gray-50);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .log-entry .q { color: var(--gray-500); }
+  .log-entry .a { font-weight: 600; }
+
+  /* Timer */
+  .timer {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .app-header h1 { font-size: 16px; }
+    .container { padding: 12px 10px 100px; }
+    .card { padding: 18px; }
+    .summary-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Print styles */
+  @media print {
+    .app-header { position: static; }
+    .header-actions, .action-row, .btn { display: none !important; }
+    .card.completed { opacity: 1; }
+    body { background: white; }
+  }
+
+  .hidden { display: none !important; }
+
+  /* Floating action for OHCA */
+  .ohca-override {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: var(--danger);
+    color: white;
+    padding: 14px 28px;
+    border-radius: 50px;
+    border: none;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(220,38,38,0.4);
+    font-family: inherit;
+    animation: pulse 2s infinite;
+    letter-spacing: 1px;
+  }
+  .ohca-override:hover { background: #b91c1c; }
+
+  /* Collapsible completed cards */
+  .card.completed .card-body { display: none; }
+  .card.completed:hover .card-body { display: block; }
+  .card.completed .card-header { cursor: pointer; }
+
+  /* Plain text summary box */
+  .plaintext-box {
+    margin-top: 20px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .plaintext-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--gray-100);
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .plaintext-header h4 {
+    color: var(--gray-700);
+    font-size: 14px;
+  }
+  .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .copy-btn:hover { background: #1e40af; }
+  .copy-btn.copied { background: var(--success); }
+  .plaintext-content {
+    padding: 16px;
+    font-family: 'Consolas', 'Microsoft JhengHei', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--gray-800);
+    max-height: 400px;
+    overflow-y: auto;
+    user-select: all;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div>
+    <h1>🚑 重大外傷派遣決策輔助系統</h1>
+    <div class="subtitle">桃園市消防局 — 派遣即檢傷雙軌模式</div>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <div class="timer" id="timer">⏱ 00:00</div>
+    <div class="header-actions">
+      <button class="header-btn" onclick="resetAll()">🔄 重新開始</button>
+      <button class="header-btn" onclick="window.print()">🖨️ 列印</button>
+    </div>
+  </div>
+</div>
+
+<div class="container" id="app">
+  <!-- Rendered by JS -->
+</div>
+
+<button class="ohca-override" id="ohcaBtn" onclick="triggerOHCA()">
+  ⚠️ 患者 OHCA — 立即派遣雙車+DACPR
+</button>
+
+<script>
+// ===== STATE =====
+const state = {
+  step: 'basic',       // current step
+  patientCount: 1,
+  incidentType: '',
+  isOHCA: false,
+  gender: '',
+  age: '',
+  isMajor: false,
+  dispatchLevel: 'normal', // normal, warning, critical
+  vehicles: { ambulance: 1, rescue: 0 },
+  findings: [],
+  log: [],
+  subStep: 0,
+  subAnswers: {},
+  startTime: Date.now(),
+};
+
+// ===== TIMER =====
+setInterval(() => {
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const s = String(elapsed % 60).padStart(2, '0');
+  document.getElementById('timer').textContent = `⏱ ${m}:${s}`;
+}, 1000);
+
+// ===== INCIDENT TYPES =====
+const incidentTypes = [
+  { id: 'fall', label: '跌落/跳樓/墜樓/摔倒', icon: '🏗️', sub: '高處墜落、跳樓、工地墜落等' },
+  { id: 'vehicle', label: '車禍', icon: '🚗', sub: '汽機車事故、行人被撞等' },
+  { id: 'machine', label: '機器設備穿刺/夾傷/夾困', icon: '⚙️', sub: '工廠機器捲入、穿刺傷等' },
+  { id: 'crush', label: '倒塌/重物壓砸/掩埋', icon: '🏚️', sub: '建物倒塌、重物壓住、掩埋等' },
+  { id: 'stab', label: '刀傷/槍傷', icon: '🔪', sub: '穿刺傷、砍傷、槍傷等' },
+  { id: 'burn', label: '爆炸/燒燙傷/火災', icon: '🔥', sub: '爆炸傷、大面積燒傷等' },
+  { id: 'other', label: '其他外傷', icon: '🩹', sub: '溺水、電擊傷、其他創傷等' },
+];
+
+// ===== QUESTION TREES =====
+const questionTrees = {
+  fall: [
+    {
+      id: 'fall_trapped',
+      question: '患者是否有受困或卡住？需不需要搜救器材？',
+      hint: '例如：卡在縫隙中、無法自行脫困等',
+      type: 'yn',
+      onYes: () => { addFinding('患者受困，需搜救器材'); addVehicle('rescue'); },
+    },
+    {
+      id: 'fall_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'fall_age',
+      question: '患者年紀？',
+      hint: '注意老人與小兒，他們的判斷標準不同',
+      type: 'input',
+      placeholder: '例如: 45歲、老年、小孩約5歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'fall_is_child',
+      question: '患者是否為小兒（約12歲以下）？',
+      type: 'yn',
+      onYes: () => { state.subAnswers.isChild = true; },
+      onNo: () => { state.subAnswers.isChild = false; },
+    },
+    {
+      id: 'fall_height_adult',
+      question: '墜落高度是否大於兩層樓（約6公尺）？',
+      hint: '二樓陽台約6公尺，請確認高度',
+      type: 'yn',
+      condition: () => !state.subAnswers.isChild,
+      onYes: () => { addFinding('成人墜落高度 > 6公尺（兩層樓）'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'fall_height_child',
+      question: '墜落高度是否大於兩倍身高（約3公尺）？',
+      hint: '小兒：約3公尺即需特別注意',
+      type: 'yn',
+      condition: () => state.subAnswers.isChild === true,
+      onYes: () => { addFinding('小兒墜落高度 > 3公尺（兩倍身高）'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'fall_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
+  ],
+
+  vehicle: [
+    {
+      id: 'veh_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'veh_age',
+      question: '患者年紀？',
+      hint: '注意老人與小兒',
+      type: 'input',
+      placeholder: '例如: 30歲、老年人、小孩',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'veh_type',
+      question: '涉及什麼車輛？',
+      type: 'choice',
+      options: [
+        { label: '🚗 汽車', value: 'car' },
+        { label: '🏍️ 機車', value: 'moto' },
+        { label: '🚲 自行車', value: 'bike' },
+        { label: '🚶 行人', value: 'pedestrian' },
+        { label: '🚛 大型車輛', value: 'truck' },
+      ],
+      onSelect: (v) => { state.subAnswers.vehType = v; },
+    },
+    {
+      id: 'veh_overturn',
+      question: '汽車是否整台翻覆？',
+      hint: '車輛翻覆為高能量機轉',
+      type: 'yn',
+      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      onYes: () => { addFinding('車輛翻覆'); setMajor(); },
+    },
+    {
+      id: 'veh_trapped_car',
+      question: '乘客是否受困車內？無法自行脫困？',
+      hint: '受困需要搜救器材',
+      type: 'yn',
+      condition: () => state.subAnswers.vehType === 'car' || state.subAnswers.vehType === 'truck',
+      onYes: () => { addFinding('乘客受困車內'); addVehicle('rescue'); addAmbulance(); },
+    },
+    {
+      id: 'veh_ejected',
+      question: '患者是否從車內飛拋出車外？',
+      type: 'yn',
+      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      onYes: () => { addFinding('患者從車內飛拋出車外'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'veh_ditch',
+      question: '車輛或人員是否掉落水溝/橋下/坑洞（超過6公尺）？',
+      type: 'yn',
+      onYes: () => { addFinding('掉落水溝/橋下超過6公尺'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'veh_runover',
+      question: '患者身體正中間是否被車輛輾過？',
+      hint: '軀幹被輾壓為嚴重機轉',
+      type: 'yn',
+      onYes: () => { addFinding('身體被車輛輾過'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'veh_under',
+      question: '患者身體是否還壓在車下出不來？',
+      type: 'yn',
+      onYes: () => { addFinding('患者壓在車下'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+    },
+    {
+      id: 'veh_deform',
+      question: '患者是否因車輛變形受困車內？',
+      type: 'yn',
+      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      onYes: () => { addFinding('車輛變形，患者受困車內'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+    },
+    {
+      id: 'veh_multi_ohca',
+      question: '如有多位患者，是否其中一人已為 OHCA？',
+      hint: '若一人OHCA，同車其他患者也應加派二車',
+      type: 'yn',
+      condition: () => state.patientCount > 1,
+      onYes: () => { addFinding('同車另一患者為OHCA，本患者加派'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'veh_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
+  ],
+
+  machine: [
+    {
+      id: 'mach_what',
+      question: '是什麼機器造成的傷害？',
+      type: 'input',
+      placeholder: '例如: 沖壓機、輸送帶、切割機、農機...',
+      onSubmit: (v) => { state.subAnswers.machineType = v; addFinding(`機器類型：${v}`); },
+    },
+    {
+      id: 'mach_stuck',
+      question: '患者是否還卡在機器裡面？需要搜救或破壞器材？',
+      type: 'yn',
+      onYes: () => { addFinding('患者卡在機器中，需搜救/破壞器材'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+    },
+    {
+      id: 'mach_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'mach_age',
+      question: '患者年紀？',
+      type: 'input',
+      placeholder: '例如: 40歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'mach_rolled',
+      question: '是否整個人被捲進機器裡面？',
+      type: 'yn',
+      onYes: () => { addFinding('整個人被捲進機器'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'mach_limb_stuck',
+      question: '是否有手腳捲進機器裡面無法脫困且持續出血？',
+      type: 'yn',
+      onYes: () => { addFinding('手腳捲入機器，持續出血'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'mach_ampu',
+      question: '是否有肢體被截肢的狀況？（手腕/腳踝以上）',
+      hint: '僅限於手掌或腳掌的不算',
+      type: 'yn',
+      onYes: () => { addFinding('手腕/腳踝以上截肢'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'mach_penetrate',
+      question: '機具是否穿刺大腿/手肘以上/頭頸部/胸部/腹部/背部？',
+      type: 'yn',
+      onYes: () => { addFinding('機具穿刺重要部位'); },
+    },
+    {
+      id: 'mach_bleeding',
+      question: '穿刺傷口是否持續湧出血水？',
+      type: 'yn',
+      condition: () => state.findings.includes('機具穿刺重要部位'),
+      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'mach_organs',
+      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
+      type: 'yn',
+      condition: () => state.findings.includes('機具穿刺重要部位'),
+      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
+    },
+  ],
+
+  crush: [
+    {
+      id: 'crush_trapped',
+      question: '患者是否受困？',
+      type: 'yn',
+      onYes: () => { addFinding('患者受困'); addVehicle('rescue'); },
+    },
+    {
+      id: 'crush_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'crush_age',
+      question: '患者年紀？',
+      type: 'input',
+      placeholder: '例如: 55歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'crush_what',
+      question: '是什麼東西倒塌壓到患者？大概有多重？',
+      hint: '派遣員自行判斷是否為高危險機轉',
+      type: 'input',
+      placeholder: '例如: 鷹架倒塌、牆壁倒塌、重型機具...',
+      onSubmit: (v) => { addFinding(`壓砸物：${v}`); },
+    },
+    {
+      id: 'crush_whole',
+      question: '患者是整個人被壓住，還是只有身體某一個部位？',
+      type: 'choice',
+      options: [
+        { label: '整個人被壓住', value: 'whole' },
+        { label: '只有某個部位', value: 'part' },
+      ],
+      onSelect: (v) => {
+        if (v === 'whole') { addFinding('整個人被壓住'); setMajor(); addAmbulance(); }
+      },
+    },
+    {
+      id: 'crush_chest',
+      question: '患者胸口或肚子是否被重物壓住，目前出不來？',
+      type: 'yn',
+      onYes: () => { addFinding('胸/腹部被重物壓住'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'crush_buried',
+      question: '患者整個人是否被埋起來了？',
+      type: 'yn',
+      onYes: () => { addFinding('患者被掩埋'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'crush_time',
+      question: '重物壓住患者後受困多久？是否超過20分鐘？',
+      hint: '受困超過20分鐘有壓砸症候群風險',
+      type: 'yn',
+      onYes: () => { addFinding('受困超過20分鐘'); setMajor(); addAmbulance(); },
+    },
+  ],
+
+  stab: [
+    {
+      id: 'stab_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'stab_age',
+      question: '患者年紀？',
+      type: 'input',
+      placeholder: '例如: 28歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'stab_weapon_in',
+      question: '凶器是否還插在患者身上？',
+      hint: '⚠️ 若是，請告知報案者「不要移除凶器」',
+      type: 'yn',
+      onYes: () => { addFinding('⚠️ 凶器仍插在患者身上（已提醒勿移除）'); },
+    },
+    {
+      id: 'stab_location',
+      question: '穿刺傷口是否位於頸部/胸部/腹部/背部/大腿？',
+      hint: '這些部位的穿刺傷可能危及生命',
+      type: 'yn',
+      onYes: () => { addFinding('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'); },
+    },
+    {
+      id: 'stab_bleeding',
+      question: '傷口是否持續湧出血水？',
+      type: 'yn',
+      condition: () => state.findings.includes('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'),
+      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'stab_organs',
+      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
+      type: 'yn',
+      condition: () => state.findings.includes('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'),
+      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'stab_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
+  ],
+
+  burn: [
+    {
+      id: 'burn_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'burn_age',
+      question: '患者年紀？',
+      type: 'input',
+      placeholder: '例如: 35歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'burn_type',
+      question: '傷害類型？',
+      type: 'choice',
+      options: [
+        { label: '💥 爆炸', value: 'explosion' },
+        { label: '🔥 燒燙傷/火災', value: 'burn' },
+        { label: '⚡ 電擊傷', value: 'electric' },
+        { label: '☢️ 化學灼傷', value: 'chemical' },
+      ],
+      onSelect: (v) => { state.subAnswers.burnType = v; addFinding(`傷害類型：${v}`); },
+    },
+    {
+      id: 'burn_explosion',
+      question: '爆炸是否造成人員被炸飛/大面積傷害？',
+      type: 'yn',
+      condition: () => state.subAnswers.burnType === 'explosion',
+      onYes: () => { addFinding('爆炸造成大面積傷害'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'burn_area',
+      question: '燒燙傷面積是否超過體表面積的18%？（約一隻手臂+胸部前面）',
+      hint: '成人一隻手臂約9%、胸部前面約9%',
+      type: 'yn',
+      condition: () => ['burn', 'chemical'].includes(state.subAnswers.burnType),
+      onYes: () => { addFinding('大面積燒燙傷 >18% TBSA'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'burn_airway',
+      question: '患者是否有吸入性灼傷的跡象？（臉部燒傷、鼻毛燒焦、聲音嘶啞）',
+      type: 'yn',
+      onYes: () => { addFinding('疑似吸入性灼傷'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'burn_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'burn_multi',
+      question: '是否有多名傷患？',
+      type: 'yn',
+      onYes: () => { addFinding('多名傷患'); addAmbulance(); },
+    },
+  ],
+
+  other: [
+    {
+      id: 'other_gender',
+      question: '患者性別？',
+      type: 'choice',
+      options: [
+        { label: '男性', value: '男' },
+        { label: '女性', value: '女' },
+        { label: '不詳', value: '不詳' },
+      ],
+      onSelect: (v) => { state.gender = v; },
+    },
+    {
+      id: 'other_age',
+      question: '患者年紀？',
+      type: 'input',
+      placeholder: '例如: 50歲',
+      onSubmit: (v) => { state.age = v; },
+    },
+    {
+      id: 'other_desc',
+      question: '請簡述傷害情況：',
+      type: 'input',
+      placeholder: '例如: 溺水、電擊、動物咬傷...',
+      onSubmit: (v) => { addFinding(`傷害描述：${v}`); },
+    },
+    {
+      id: 'other_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'other_breathing',
+      question: '患者是否有正常呼吸？',
+      type: 'yn',
+      onNo: () => { addFinding('呼吸異常'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'other_bleeding',
+      question: '是否有大量出血？',
+      type: 'yn',
+      onYes: () => { addFinding('大量出血'); setMajor(); addAmbulance(); },
+    },
+  ],
+};
+
+// ===== HELPER FUNCTIONS =====
+function addFinding(f) {
+  if (!state.findings.includes(f)) state.findings.push(f);
+}
+
+function setMajor() {
+  state.isMajor = true;
+  state.dispatchLevel = 'critical';
+}
+
+function addAmbulance() {
+  if (state.vehicles.ambulance < 2) state.vehicles.ambulance = 2;
+}
+
+function addVehicle(type) {
+  if (type === 'rescue') state.vehicles.rescue = Math.max(state.vehicles.rescue, 1);
+}
+
+function addLog(question, answer) {
+  state.log.push({ q: question, a: answer });
+}
+
+function triggerOHCA() {
+  state.isOHCA = true;
+  state.isMajor = true;
+  state.dispatchLevel = 'critical';
+  state.vehicles.ambulance = 2;
+  addFinding('患者 OHCA — 立即派遣雙車 + DACPR');
+  addLog('OHCA 緊急通報', '是 — 已觸發雙車+DACPR派遣');
+  state.step = 'summary';
+  render();
+}
+
+function resetAll() {
+  if (!confirm('確定要重新開始嗎？所有資料將被清除。')) return;
+  Object.assign(state, {
+    step: 'basic',
+    patientCount: 1,
+    incidentType: '',
+    isOHCA: false,
+    gender: '',
+    age: '',
+    isMajor: false,
+    dispatchLevel: 'normal',
+    vehicles: { ambulance: 1, rescue: 0 },
+    findings: [],
+    log: [],
+    subStep: 0,
+    subAnswers: {},
+    startTime: Date.now(),
+  });
+  render();
+}
+
+// ===== RENDER ENGINE =====
+function render() {
+  const app = document.getElementById('app');
+  const ohcaBtn = document.getElementById('ohcaBtn');
+
+  // Show/hide OHCA button
+  ohcaBtn.classList.toggle('hidden', state.step === 'summary' || state.isOHCA);
+
+  let html = '';
+
+  // Progress bar
+  const steps = ['basic', 'ohca_check', 'incident_type', 'detail_questions', 'summary'];
+  const currentIdx = steps.indexOf(state.step);
+  const progress = state.step === 'summary' ? 100 : Math.max(10, ((currentIdx + 1) / steps.length) * 100);
+  html += `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>`;
+
+  // Dispatch status banner
+  html += renderDispatchBanner();
+
+  // Step content
+  switch (state.step) {
+    case 'basic': html += renderBasicInfo(); break;
+    case 'ohca_check': html += renderOHCACheck(); break;
+    case 'incident_type': html += renderIncidentType(); break;
+    case 'detail_questions': html += renderDetailQuestions(); break;
+    case 'summary': html += renderSummary(); break;
+  }
+
+  app.innerHTML = html;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+}
+
+function renderDispatchBanner() {
+  let level, icon, text;
+  if (state.isOHCA) {
+    level = 'critical'; icon = '🚨'; text = `OHCA — 派遣 ${state.vehicles.ambulance} 輛救護車 + DACPR`;
+  } else if (state.isMajor) {
+    level = 'critical'; icon = '🚨';
+    const parts = [`${state.vehicles.ambulance} 輛救護車`];
+    if (state.vehicles.rescue > 0) parts.push(`${state.vehicles.rescue} 輛救災車`);
+    text = `重大外傷 — 派遣 ${parts.join(' + ')}`;
+  } else if (state.dispatchLevel === 'warning') {
+    level = 'warning'; icon = '⚠️'; text = '評估中 — 需進一步確認';
+  } else {
+    level = 'normal'; icon = '🟢'; text = `一般派遣 — ${state.vehicles.ambulance} 輛救護車`;
+  }
+  return `
+    <div class="dispatch-banner level-${level}">
+      <span class="icon">${icon}</span>
+      <div class="details">
+        <div class="label">目前派遣建議</div>
+        <div>${text}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderBasicInfo() {
+  return `
+    <div class="card">
+      <div class="card-step">步驟 1/4</div>
+      <div class="card-title">📋 基本資訊</div>
+      <div class="card-desc">請先確認案件基本資訊</div>
+
+      <div class="form-group">
+        <label>👥 患者總人數</label>
+        <div class="yn-grid">
+          ${[1,2,3,'4+'].map(n => `
+            <button class="yn-btn ${state.patientCount == n ? 'yes-btn selected' : ''}"
+                    onclick="state.patientCount = ${typeof n === 'number' ? n : 4}; render()">
+              ${n} 人
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="goToOHCA()">
+          下一步 →
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function goToOHCA() {
+  addLog('患者人數', `${state.patientCount} 人`);
+  state.step = 'ohca_check';
+  render();
+}
+
+function renderOHCACheck() {
+  return `
+    <div class="card completed">
+      <div class="card-header"><div class="card-title">📋 基本資訊</div></div>
+      <div class="card-body">
+        <div class="log-entry"><span class="q">人數</span><span class="a">${state.patientCount} 人</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-step">步驟 2/4</div>
+      <div class="card-title">💔 OHCA 確認</div>
+      <div class="card-desc">患者是否已無呼吸心跳（OHCA）？</div>
+      <div class="card-hint">
+        ⚠️ 若患者為 OHCA，將立即派遣雙車 + DACPR，不需進一步評估機轉。
+      </div>
+      <div class="yn-grid">
+        <button class="yn-btn yes-btn" onclick="handleOHCAYes()">
+          ⚠️ 是 OHCA
+        </button>
+        <button class="yn-btn no-btn" onclick="handleOHCANo()">
+          ✓ 否 / 不確定
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function handleOHCAYes() {
+  state.isOHCA = true;
+  state.isMajor = true;
+  state.dispatchLevel = 'critical';
+  state.vehicles.ambulance = 2;
+  addFinding('患者 OHCA');
+  addLog('是否 OHCA', '是 → 立即派遣雙車 + DACPR');
+  state.step = 'summary';
+  render();
+}
+
+function handleOHCANo() {
+  addLog('是否 OHCA', '否');
+  state.step = 'incident_type';
+  render();
+}
+
+function renderIncidentType() {
+  return `
+    <div class="card completed">
+      <div class="card-header"><div class="card-title">📋 基本資訊 + OHCA 確認</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-step">步驟 3/4</div>
+      <div class="card-title">🔍 事故類型辨識</div>
+      <div class="card-desc">辨識為外科後，請選擇受傷機轉類型：</div>
+      <div class="choice-grid">
+        ${incidentTypes.map(t => `
+          <button class="choice-btn" onclick="selectIncidentType('${t.id}')">
+            <span class="choice-icon">${t.icon}</span>
+            <div class="choice-text">
+              <div>${t.label}</div>
+              <div class="sub">${t.sub}</div>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function selectIncidentType(type) {
+  state.incidentType = type;
+  const t = incidentTypes.find(x => x.id === type);
+  addLog('事故類型', t.label);
+  state.subStep = 0;
+  state.step = 'detail_questions';
+  render();
+}
+
+function renderDetailQuestions() {
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  const typeName = incidentTypes.find(x => x.id === state.incidentType)?.label || '其他';
+
+  // Find current question (skip conditions that aren't met)
+  let currentQ = null;
+  let currentIdx = state.subStep;
+  while (currentIdx < tree.length) {
+    const q = tree[currentIdx];
+    if (q.condition && !q.condition()) {
+      currentIdx++;
+      state.subStep = currentIdx;
+      continue;
+    }
+    currentQ = q;
+    break;
+  }
+
+  // If no more questions, go to summary
+  if (!currentQ) {
+    state.step = 'summary';
+    return renderSummary();
+  }
+
+  let html = `
+    <div class="card completed">
+      <div class="card-header"><div class="card-title">📋 基本資訊 → ${typeName}</div></div>
+    </div>
+  `;
+
+  // Show completed question log
+  if (state.log.length > 2) {
+    html += `<div class="card" style="padding:16px">
+      <div style="font-size:14px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">📝 已記錄的回答</div>
+      ${state.log.slice(2).map(l => `
+        <div class="log-entry">
+          <span class="q">${l.q}</span>
+          <span class="a">${l.a}</span>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+
+  // Current question
+  html += `
+    <div class="card">
+      <div class="card-step">步驟 4 — 機轉追問 (${currentIdx + 1}/${tree.length})</div>
+      <div class="card-title">${currentQ.question}</div>
+      ${currentQ.hint ? `<div class="card-hint">💡 ${currentQ.hint}</div>` : ''}
+  `;
+
+  switch (currentQ.type) {
+    case 'yn':
+      html += `
+        <div class="yn-grid">
+          <button class="yn-btn yes-btn" onclick="answerYN('${currentQ.id}', true)">✅ 是</button>
+          <button class="yn-btn no-btn" onclick="answerYN('${currentQ.id}', false)">❌ 否 / 不確定</button>
+        </div>
+      `;
+      break;
+    case 'choice':
+      html += `<div class="choice-grid">
+        ${currentQ.options.map(o => `
+          <button class="choice-btn" onclick="answerChoice('${currentQ.id}', '${o.value}', '${o.label}')">
+            <div class="choice-text"><div>${o.label}</div></div>
+          </button>
+        `).join('')}
+      </div>`;
+      break;
+    case 'input':
+      html += `
+        <div class="form-group">
+          <input class="form-input" id="inp_${currentQ.id}" type="text"
+                 placeholder="${currentQ.placeholder || ''}"
+                 onkeypress="if(event.key==='Enter')answerInput('${currentQ.id}')">
+        </div>
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="answerInput('${currentQ.id}')">確認 →</button>
+        </div>
+      `;
+      break;
+  }
+
+  // Skip button
+  html += `
+    <div class="action-row" style="margin-top:12px">
+      <button class="btn btn-secondary" onclick="skipQuestion()">跳過此題 →</button>
+      <button class="btn btn-secondary" onclick="finishEarly()">結束評估 →</button>
+    </div>
+  `;
+
+  html += `</div>`;
+  return html;
+}
+
+function answerYN(id, isYes) {
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  const q = tree.find(x => x.id === id);
+  if (!q) return;
+
+  addLog(q.question, isYes ? '是' : '否');
+  if (isYes && q.onYes) q.onYes();
+  if (!isYes && q.onNo) q.onNo();
+
+  state.subStep++;
+  render();
+}
+
+function answerChoice(id, value, label) {
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  const q = tree.find(x => x.id === id);
+  if (!q) return;
+
+  addLog(q.question, label);
+  if (q.onSelect) q.onSelect(value);
+
+  state.subStep++;
+  render();
+}
+
+function answerInput(id) {
+  const inp = document.getElementById(`inp_${id}`);
+  if (!inp || !inp.value.trim()) {
+    alert('請輸入回答');
+    return;
+  }
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  const q = tree.find(x => x.id === id);
+  if (!q) return;
+
+  addLog(q.question, inp.value.trim());
+  if (q.onSubmit) q.onSubmit(inp.value.trim());
+
+  state.subStep++;
+  render();
+}
+
+function skipQuestion() {
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  if (state.subStep < tree.length) {
+    addLog(tree[state.subStep].question, '（跳過）');
+  }
+  state.subStep++;
+  render();
+}
+
+function finishEarly() {
+  state.step = 'summary';
+  render();
+}
+
+function renderSummary() {
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const s = String(elapsed % 60).padStart(2, '0');
+  const typeName = incidentTypes.find(x => x.id === state.incidentType)?.label || '其他';
+
+  const vehicleDesc = [];
+  vehicleDesc.push(`🚑 救護車 × ${state.vehicles.ambulance}`);
+  if (state.vehicles.rescue > 0) vehicleDesc.push(`🚒 救災車 × ${state.vehicles.rescue}`);
+  if (state.isOHCA) vehicleDesc.push('📱 DACPR 指導');
+
+  let html = `
+    <div class="summary-section">
+      <div class="summary-title">📋 派遣決策總結報告</div>
+
+      <div class="dispatch-result ${state.isMajor ? 'major' : 'normal'}">
+        <div class="dr-title">${state.isMajor ? '🚨 判定為重大外傷' : '🟢 非重大外傷'}</div>
+        <div>${state.isOHCA ? 'OHCA 緊急案件' : typeName}</div>
+        <div class="dr-vehicles">${vehicleDesc.join(' ＋ ')}</div>
+      </div>
+
+      <div class="summary-grid" style="margin-top:20px">
+        <div class="summary-item">
+          <div class="s-label">患者人數</div>
+          <div class="s-value">${state.patientCount} 人</div>
+        </div>
+        <div class="summary-item">
+          <div class="s-label">患者性別</div>
+          <div class="s-value">${state.gender || '不詳'}</div>
+        </div>
+        <div class="summary-item">
+          <div class="s-label">患者年紀</div>
+          <div class="s-value">${state.age || '不詳'}</div>
+        </div>
+        <div class="summary-item">
+          <div class="s-label">事故類型</div>
+          <div class="s-value">${typeName}</div>
+        </div>
+        <div class="summary-item">
+          <div class="s-label">通話時間</div>
+          <div class="s-value">${m}:${s}</div>
+        </div>
+      </div>
+  `;
+
+  if (state.findings.length > 0) {
+    html += `
+      <div class="key-findings">
+        <h4>🔑 關鍵發現（判定依據）</h4>
+        <ul>
+          ${state.findings.map(f => `<li>${f}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+  }
+
+  // Full Q&A log
+  html += `
+    <div style="margin-top:20px">
+      <h4 style="color:var(--gray-700);margin-bottom:10px">📝 完整問答記錄</h4>
+      ${state.log.map(l => `
+        <div class="log-entry">
+          <span class="q">${l.q}</span>
+          <span class="a">${l.a}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  // Dispatch recommendation details
+  html += `
+    <div style="margin-top:20px; padding:16px; background:var(--primary-light); border-radius:var(--radius); border:1px solid var(--primary);">
+      <h4 style="color:var(--primary);margin-bottom:8px">🚑 派遣建議明細</h4>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr style="border-bottom:1px solid var(--gray-200)">
+          <td style="padding:8px;font-weight:600">救護車</td>
+          <td style="padding:8px">${state.vehicles.ambulance} 輛${state.vehicles.ambulance >= 2 ? ' ⚠️ 加派' : ''}</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--gray-200)">
+          <td style="padding:8px;font-weight:600">救災車</td>
+          <td style="padding:8px">${state.vehicles.rescue > 0 ? state.vehicles.rescue + ' 輛 ⚠️ 加派' : '不需要'}</td>
+        </tr>
+        ${state.isOHCA ? `
+        <tr>
+          <td style="padding:8px;font-weight:600">DACPR</td>
+          <td style="padding:8px">是 — 電話指導 CPR</td>
+        </tr>
+        ` : ''}
+      </table>
+    </div>
+  `;
+
+  // === Plain text summary for copy/paste (concise one-liner) ===
+  const parts = [];
+  parts.push(`受傷人數${state.patientCount}人`);
+
+  // Consciousness: check findings for 無意識 or OHCA
+  if (state.isOHCA) {
+    parts.push('OHCA');
+  } else if (state.findings.some(f => f.includes('無意識'))) {
+    parts.push('無意識');
+  } else {
+    parts.push('清醒');
+  }
+
+  // Incident type
+  parts.push(typeName);
+
+  // Key findings (concise)
+  state.findings.forEach(f => {
+    // Skip consciousness-related findings (already handled above)
+    if (f.includes('無意識')) return;
+    parts.push(f);
+  });
+
+  // Dispatch vehicles
+  parts.push(`派救護${state.vehicles.ambulance}車`);
+  if (state.vehicles.rescue > 0) parts.push(`派救災${state.vehicles.rescue}車`);
+  if (state.isOHCA) parts.push('DACPR');
+
+  // Gender & Age
+  parts.push(`性別${state.gender || '不詳'}`);
+  parts.push(`年齡${state.age || ''}歲`);
+
+  const plainText = parts.join('，');
+
+  html += `
+    <div class="plaintext-box">
+      <div class="plaintext-header">
+        <h4>現場狀況（複製以下文字至派遣系統）</h4>
+        <button class="copy-btn" id="copyBtn" onclick="copyPlainText()">📋 複製全文</button>
+      </div>
+      <div class="plaintext-content" id="plainTextContent">${plainText}</div>
+    </div>
+  `;
+
+  html += `
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-primary" onclick="window.print()">🖨️ 列印報告</button>
+      <button class="btn btn-danger" onclick="resetAll()">🔄 新案件</button>
+    </div>
+  `;
+
+  return html;
+}
+
+function copyPlainText() {
+  const text = document.getElementById('plainTextContent').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.classList.add('copied');
+    btn.innerHTML = '✅ 已複製';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = '📋 複製全文';
+    }, 2000);
+  }).catch(() => {
+    // Fallback for older browsers
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById('plainTextContent'));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('copy');
+    const btn = document.getElementById('copyBtn');
+    btn.innerHTML = '✅ 已複製';
+    setTimeout(() => { btn.innerHTML = '📋 複製全文'; }, 2000);
+  });
+}
+
+// ===== INIT =====
+render();
+</script>
+
+</body>
+</html>
