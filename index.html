@@ -484,12 +484,14 @@ const state = {
   age: '',
   isMajor: false,
   dispatchLevel: 'normal', // normal, warning, critical
-  vehicles: { ambulance: 1, rescue: 0 },
+  vehicles: { ambulance: 1, rescue: 0, specialSearch: 0 },
   findings: [],
   log: [],
   subStep: 0,
   subAnswers: {},
   startTime: Date.now(),
+  currentPatientIdx: 0,
+  patients: [],
 };
 
 // ===== TIMER =====
@@ -507,8 +509,7 @@ const incidentTypes = [
   { id: 'machine', label: '機器設備穿刺/夾傷/夾困', icon: '⚙️', sub: '工廠機器捲入、穿刺傷等' },
   { id: 'crush', label: '倒塌/重物壓砸/掩埋', icon: '🏚️', sub: '建物倒塌、重物壓住、掩埋等' },
   { id: 'stab', label: '刀傷/槍傷', icon: '🔪', sub: '穿刺傷、砍傷、槍傷等' },
-  { id: 'burn', label: '爆炸/燒燙傷/火災', icon: '🔥', sub: '爆炸傷、大面積燒傷等' },
-  { id: 'other', label: '其他外傷', icon: '🩹', sub: '溺水、電擊傷、其他創傷等' },
+  { id: 'other', label: '其他外傷', icon: '🩹', sub: '電擊傷、其他創傷等' },
 ];
 
 // ===== QUESTION TREES =====
@@ -611,14 +612,7 @@ const questionTrees = {
       type: 'yn',
       condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
       onYes: () => { addFinding('車輛翻覆'); setMajor(); },
-    },
-    {
-      id: 'veh_trapped_car',
-      question: '乘客是否受困車內？無法自行脫困？',
-      hint: '受困需要搜救器材',
-      type: 'yn',
-      condition: () => state.subAnswers.vehType === 'car' || state.subAnswers.vehType === 'truck',
-      onYes: () => { addFinding('乘客受困車內'); addVehicle('rescue'); addAmbulance(); },
+      scene: true,
     },
     {
       id: 'veh_ejected',
@@ -632,6 +626,7 @@ const questionTrees = {
       question: '車輛或人員是否掉落水溝/橋下/坑洞（超過6公尺）？',
       type: 'yn',
       onYes: () => { addFinding('掉落水溝/橋下超過6公尺'); setMajor(); addAmbulance(); },
+      scene: true,
     },
     {
       id: 'veh_runover',
@@ -660,6 +655,7 @@ const questionTrees = {
       type: 'yn',
       condition: () => state.patientCount > 1,
       onYes: () => { addFinding('同車另一患者為OHCA，本患者加派'); setMajor(); addAmbulance(); },
+      scene: true,
     },
     {
       id: 'veh_conscious',
@@ -676,6 +672,7 @@ const questionTrees = {
       type: 'input',
       placeholder: '例如: 沖壓機、輸送帶、切割機、農機...',
       onSubmit: (v) => { state.subAnswers.machineType = v; addFinding(`機器類型：${v}`); },
+      scene: true,
     },
     {
       id: 'mach_stuck',
@@ -774,6 +771,7 @@ const questionTrees = {
       type: 'input',
       placeholder: '例如: 鷹架倒塌、牆壁倒塌、重型機具...',
       onSubmit: (v) => { addFinding(`壓砸物：${v}`); },
+      scene: true,
     },
     {
       id: 'crush_whole',
@@ -839,7 +837,7 @@ const questionTrees = {
       question: '穿刺傷口是否位於頸部/胸部/腹部/背部/大腿？',
       hint: '這些部位的穿刺傷可能危及生命',
       type: 'yn',
-      onYes: () => { addFinding('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'); },
+      onYes: () => { addFinding('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'); setMajor(); addAmbulance(); },
     },
     {
       id: 'stab_bleeding',
@@ -860,72 +858,6 @@ const questionTrees = {
       question: '患者目前是否有意識？',
       type: 'yn',
       onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
-    },
-  ],
-
-  burn: [
-    {
-      id: 'burn_gender',
-      question: '患者性別？',
-      type: 'choice',
-      options: [
-        { label: '男性', value: '男' },
-        { label: '女性', value: '女' },
-        { label: '不詳', value: '不詳' },
-      ],
-      onSelect: (v) => { state.gender = v; },
-    },
-    {
-      id: 'burn_age',
-      question: '患者年紀？',
-      type: 'input',
-      placeholder: '例如: 35歲',
-      onSubmit: (v) => { state.age = v; },
-    },
-    {
-      id: 'burn_type',
-      question: '傷害類型？',
-      type: 'choice',
-      options: [
-        { label: '💥 爆炸', value: 'explosion' },
-        { label: '🔥 燒燙傷/火災', value: 'burn' },
-        { label: '⚡ 電擊傷', value: 'electric' },
-        { label: '☢️ 化學灼傷', value: 'chemical' },
-      ],
-      onSelect: (v) => { state.subAnswers.burnType = v; addFinding(`傷害類型：${v}`); },
-    },
-    {
-      id: 'burn_explosion',
-      question: '爆炸是否造成人員被炸飛/大面積傷害？',
-      type: 'yn',
-      condition: () => state.subAnswers.burnType === 'explosion',
-      onYes: () => { addFinding('爆炸造成大面積傷害'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'burn_area',
-      question: '燒燙傷面積是否超過體表面積的18%？（約一隻手臂+胸部前面）',
-      hint: '成人一隻手臂約9%、胸部前面約9%',
-      type: 'yn',
-      condition: () => ['burn', 'chemical'].includes(state.subAnswers.burnType),
-      onYes: () => { addFinding('大面積燒燙傷 >18% TBSA'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'burn_airway',
-      question: '患者是否有吸入性灼傷的跡象？（臉部燒傷、鼻毛燒焦、聲音嘶啞）',
-      type: 'yn',
-      onYes: () => { addFinding('疑似吸入性灼傷'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'burn_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'burn_multi',
-      question: '是否有多名傷患？',
-      type: 'yn',
-      onYes: () => { addFinding('多名傷患'); addAmbulance(); },
     },
   ],
 
@@ -952,7 +884,7 @@ const questionTrees = {
       id: 'other_desc',
       question: '請簡述傷害情況：',
       type: 'input',
-      placeholder: '例如: 溺水、電擊、動物咬傷...',
+      placeholder: '例如: 電擊、動物咬傷...',
       onSubmit: (v) => { addFinding(`傷害描述：${v}`); },
     },
     {
@@ -979,23 +911,67 @@ const questionTrees = {
 // ===== HELPER FUNCTIONS =====
 function addFinding(f) {
   if (!state.findings.includes(f)) state.findings.push(f);
+  if (state.patientCount > 1 && state.patients.length > 0 && state.currentPatientIdx < state.patients.length) {
+    const p = state.patients[state.currentPatientIdx];
+    if (p && !p.findings.includes(f)) p.findings.push(f);
+    // Track consciousness per patient
+    if (f.includes('無意識')) p.conscious = false;
+  }
 }
 
 function setMajor() {
   state.isMajor = true;
   state.dispatchLevel = 'critical';
+  // Mark current patient as major in multi-patient mode
+  if (state.patientCount > 1 && state.patients.length > 0 && state.currentPatientIdx < state.patients.length) {
+    state.patients[state.currentPatientIdx].isMajor = true;
+  }
+  recalcVehicles();
 }
 
 function addAmbulance() {
-  if (state.vehicles.ambulance < 2) state.vehicles.ambulance = 2;
+  recalcVehicles();
 }
 
 function addVehicle(type) {
+  if (state.patientCount > 1 && state.patients.length > 0 && state.currentPatientIdx < state.patients.length) {
+    if (type === 'rescue') state.patients[state.currentPatientIdx].needRescue = true;
+    if (type === 'specialSearch') state.patients[state.currentPatientIdx].needSpecialSearch = true;
+  }
   if (type === 'rescue') state.vehicles.rescue = Math.max(state.vehicles.rescue, 1);
+  if (type === 'specialSearch') state.vehicles.specialSearch = Math.max(state.vehicles.specialSearch, 1);
+  recalcVehicles();
+}
+
+function recalcVehicles() {
+  if (state.patientCount > 1 && state.patients.length > 0) {
+    // Count major and non-major patients (including current patient's live state)
+    let majorCount = 0;
+    let rescueCount = 0;
+    let specialSearchCount = 0;
+    state.patients.forEach((p, idx) => {
+      const isMaj = (idx === state.currentPatientIdx) ? (state.isMajor || p.isMajor) : p.isMajor;
+      if (isMaj) majorCount++;
+      if (p.needRescue) rescueCount++;
+      if (p.needSpecialSearch) specialSearchCount++;
+    });
+    // Each major patient needs 2 ambulances, each non-major needs 1
+    const nonMajorCount = state.patientCount - majorCount;
+    state.vehicles.ambulance = Math.max(majorCount * 2 + nonMajorCount, state.patientCount);
+    state.vehicles.rescue = rescueCount;
+    state.vehicles.specialSearch = specialSearchCount;
+  } else {
+    // Single patient mode
+    if (state.isMajor) {
+      state.vehicles.ambulance = Math.max(state.vehicles.ambulance, 2);
+    }
+  }
 }
 
 function addLog(question, answer) {
-  state.log.push({ q: question, a: answer });
+  const prefix = (state.patientCount > 1 && state.step === 'detail_questions') ?
+    `[${String.fromCharCode(65 + state.currentPatientIdx)}傷患] ` : '';
+  state.log.push({ q: prefix + question, a: answer });
 }
 
 function resetAll() {
@@ -1009,12 +985,14 @@ function resetAll() {
     age: '',
     isMajor: false,
     dispatchLevel: 'normal',
-    vehicles: { ambulance: 1, rescue: 0 },
+    vehicles: { ambulance: 1, rescue: 0, specialSearch: 0 },
     findings: [],
     log: [],
     subStep: 0,
     subAnswers: {},
     startTime: Date.now(),
+    currentPatientIdx: 0,
+    patients: [],
   });
   render();
 }
@@ -1051,11 +1029,16 @@ function render() {
 function renderDispatchBanner() {
   let level, icon, text;
   if (state.isOHCA) {
-    level = 'critical'; icon = '🚨'; text = `OHCA — 派遣 ${state.vehicles.ambulance} 輛救護車`;
+    level = 'critical'; icon = '🚨';
+    const ohcaParts = [`${state.vehicles.ambulance} 輛救護車`];
+    if (state.vehicles.rescue > 0) ohcaParts.push(`${state.vehicles.rescue} 輛救災車`);
+    if (state.vehicles.specialSearch > 0) ohcaParts.push(`${state.vehicles.specialSearch} 輛特搜車`);
+    text = `OHCA — 派遣 ${ohcaParts.join(' + ')}`;
   } else if (state.isMajor) {
     level = 'critical'; icon = '🚨';
     const parts = [`${state.vehicles.ambulance} 輛救護車`];
     if (state.vehicles.rescue > 0) parts.push(`${state.vehicles.rescue} 輛救災車`);
+    if (state.vehicles.specialSearch > 0) parts.push(`${state.vehicles.specialSearch} 輛特搜車`);
     text = `重大外傷 — 派遣 ${parts.join(' + ')}`;
   } else if (state.dispatchLevel === 'warning') {
     level = 'warning'; icon = '⚠️'; text = '評估中 — 需進一步確認';
@@ -1083,12 +1066,15 @@ function renderBasicInfo() {
       <div class="form-group">
         <label>👥 患者總人數</label>
         <div class="yn-grid">
-          ${[1,2,3,'4+'].map(n => `
-            <button class="yn-btn ${state.patientCount == n ? 'yes-btn selected' : ''}"
-                    onclick="state.patientCount = ${typeof n === 'number' ? n : 4}; render()">
+          ${[1,2,3,'4+'].map(n => {
+            const num = typeof n === 'number' ? n : 4;
+            return `
+            <button class="yn-btn ${state.patientCount === num ? 'yes-btn selected' : ''}"
+                    onclick="selectPatientCount(${num})">
               ${n} 人
             </button>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       </div>
 
@@ -1101,8 +1087,33 @@ function renderBasicInfo() {
   `;
 }
 
+function selectPatientCount(n) {
+  state.patientCount = n;
+  if (n >= 4) {
+    alert('⚠️ 4人以上傷患，建議啟動大量傷患程序！');
+  }
+  render();
+}
+
 function goToOHCA() {
   addLog('患者人數', `${state.patientCount} 人`);
+  state.vehicles.ambulance = Math.max(state.vehicles.ambulance, state.patientCount);
+  if (state.patientCount > 1) {
+    state.patients = [];
+    for (let i = 0; i < state.patientCount; i++) {
+      state.patients.push({
+        label: String.fromCharCode(65 + i),
+        gender: '',
+        age: '',
+        vehType: '',
+        conscious: null,
+        findings: [],
+        isMajor: false,
+        needRescue: false,
+        needSpecialSearch: false,
+      });
+    }
+  }
   state.step = 'ohca_check';
   render();
 }
@@ -1128,7 +1139,7 @@ function renderOHCACheck() {
           ⚠️ 是 OHCA
         </button>
         <button class="yn-btn no-btn" onclick="handleOHCANo()">
-          ✓ 否 / 不確定
+          ❌ 否
         </button>
       </div>
     </div>
@@ -1139,7 +1150,12 @@ function handleOHCAYes() {
   state.isOHCA = true;
   state.isMajor = true;
   state.dispatchLevel = 'critical';
-  state.vehicles.ambulance = 2;
+  // OHCA: each patient needs 2 ambulances (stacked)
+  state.vehicles.ambulance = Math.max(2, state.patientCount * 2);
+  // Mark all patients as major for OHCA
+  if (state.patients.length > 0) {
+    state.patients.forEach(p => p.isMajor = true);
+  }
   addFinding('患者 OHCA');
   addLog('是否 OHCA', '是 → 立即派遣雙車');
   state.subAnswers.ohcaDetailStep = 0;
@@ -1163,7 +1179,7 @@ function renderOHCADetail() {
   `;
 
   // Show completed answers
-  const ohcaLog = state.log.filter(l => ['患者性別', '患者年紀', '是否受困'].includes(l.q));
+  const ohcaLog = state.log.filter(l => ['患者性別', '患者年紀', '是否受困', '是否受困於重型車'].includes(l.q));
   if (ohcaLog.length > 0) {
     html += `<div class="card" style="padding:16px">
       <div style="font-size:14px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">📝 已記錄的回答</div>
@@ -1180,7 +1196,7 @@ function renderOHCADetail() {
     // Gender
     html += `
       <div class="card">
-        <div class="card-step">OHCA 補充資訊 (1/3)</div>
+        <div class="card-step">OHCA 補充資訊 (1/4)</div>
         <div class="card-title">👤 患者性別？</div>
         <div class="choice-grid">
           <button class="choice-btn" onclick="ohcaDetailSelect('gender', '男')">
@@ -1202,7 +1218,7 @@ function renderOHCADetail() {
     // Age
     html += `
       <div class="card">
-        <div class="card-step">OHCA 補充資訊 (2/3)</div>
+        <div class="card-step">OHCA 補充資訊 (2/4)</div>
         <div class="card-title">🎂 患者年紀？</div>
         <div class="card-hint">💡 請輸入年齡或描述（如：老年人、小孩約5歲）</div>
         <div class="form-group">
@@ -1219,12 +1235,25 @@ function renderOHCADetail() {
     // Trapped
     html += `
       <div class="card">
-        <div class="card-step">OHCA 補充資訊 (3/3)</div>
+        <div class="card-step">OHCA 補充資訊 (3/4)</div>
         <div class="card-title">🚧 患者是否有受困或卡住？</div>
         <div class="card-hint">💡 例如：卡在車內、受困瓦礫中、無法自行脫困等</div>
         <div class="yn-grid">
           <button class="yn-btn yes-btn" onclick="ohcaDetailTrapped(true)">✅ 是</button>
-          <button class="yn-btn no-btn" onclick="ohcaDetailTrapped(false)">❌ 否 / 不確定</button>
+          <button class="yn-btn no-btn" onclick="ohcaDetailTrapped(false)">❌ 否</button>
+        </div>
+      </div>
+    `;
+  } else if (step === 3) {
+    // Heavy vehicle
+    html += `
+      <div class="card">
+        <div class="card-step">OHCA 補充資訊 (4/4)</div>
+        <div class="card-title">🚛 患者是否受困於重型車輛（大貨車、聯結車）？</div>
+        <div class="card-hint">💡 若受困於大貨車或聯結車，需加派特搜車</div>
+        <div class="yn-grid">
+          <button class="yn-btn yes-btn" onclick="ohcaDetailHeavyVehicle(true)">✅ 是</button>
+          <button class="yn-btn no-btn" onclick="ohcaDetailHeavyVehicle(false)">❌ 否</button>
         </div>
       </div>
     `;
@@ -1264,6 +1293,18 @@ function ohcaDetailTrapped(yes) {
     addLog('是否受困', '是 → 加派救災車');
   } else {
     addLog('是否受困', '否');
+  }
+  state.subAnswers.ohcaDetailStep = 3;
+  render();
+}
+
+function ohcaDetailHeavyVehicle(yes) {
+  if (yes) {
+    addFinding('受困於重型車輛（大貨車/聯結車），需加派特搜車');
+    addVehicle('specialSearch');
+    addLog('是否受困於重型車', '是 → 加派特搜車');
+  } else {
+    addLog('是否受困於重型車', '否');
   }
   state.step = 'summary';
   render();
@@ -1307,7 +1348,7 @@ function renderDetailQuestions() {
   const tree = questionTrees[state.incidentType] || questionTrees.other;
   const typeName = incidentTypes.find(x => x.id === state.incidentType)?.label || '其他';
 
-  // Find current question (skip conditions that aren't met)
+  // Find current question (skip conditions that aren't met and scene questions for non-first patients)
   let currentQ = null;
   let currentIdx = state.subStep;
   while (currentIdx < tree.length) {
@@ -1317,12 +1358,60 @@ function renderDetailQuestions() {
       state.subStep = currentIdx;
       continue;
     }
+    if (q.scene && state.currentPatientIdx > 0) {
+      currentIdx++;
+      state.subStep = currentIdx;
+      continue;
+    }
     currentQ = q;
     break;
   }
 
-  // If no more questions, go to summary
+  // If no more questions for this patient
   if (!currentQ) {
+    if (state.patientCount > 1) {
+      // Save current patient data
+      if (state.currentPatientIdx < state.patients.length) {
+        const cp = state.patients[state.currentPatientIdx];
+        cp.gender = state.gender;
+        cp.age = state.age;
+        cp.vehType = state.subAnswers.vehType || '';
+        if (cp.conscious === null) cp.conscious = true; // default conscious if not marked otherwise
+        // Save per-patient major/vehicle flags
+        if (state.isMajor) cp.isMajor = true;
+      }
+      if (state.currentPatientIdx < state.patientCount - 1) {
+        // Move to next patient — reset per-patient state so conditions don't leak
+        state.currentPatientIdx++;
+        state.gender = '';
+        state.age = '';
+        state.subAnswers.vehType = '';
+        state.subAnswers.isChild = undefined;
+        // Reset findings and isMajor for next patient (per-patient data already saved)
+        state.findings = [];
+        state.isMajor = false;
+        state.subStep = 0;
+        return renderDetailQuestions();
+      }
+    }
+    // Merge all patient findings back into global state for summary
+    if (state.patientCount > 1 && state.patients.length > 0) {
+      // Save last patient's major status
+      if (state.currentPatientIdx < state.patients.length && state.isMajor) {
+        state.patients[state.currentPatientIdx].isMajor = true;
+      }
+      state.findings = [];
+      state.patients.forEach(p => {
+        (p.findings || []).forEach(f => {
+          if (!state.findings.includes(f)) state.findings.push(f);
+        });
+      });
+      // Restore global isMajor if any patient is major
+      state.isMajor = state.patients.some(p => p.isMajor);
+      if (state.isMajor) state.dispatchLevel = 'critical';
+      // Final recalc of stacked vehicles
+      recalcVehicles();
+    }
     state.step = 'summary';
     return renderSummary();
   }
@@ -1332,6 +1421,14 @@ function renderDetailQuestions() {
       <div class="card-header"><div class="card-title">📋 基本資訊 → ${typeName}</div></div>
     </div>
   `;
+
+  // Patient label for multi-patient
+  if (state.patientCount > 1) {
+    const patientLabel = String.fromCharCode(65 + state.currentPatientIdx);
+    html += `<div class="card" style="padding:12px 20px; background:var(--warning-light); border:2px solid var(--warning); margin-bottom:12px; text-align:center;">
+      <strong style="font-size:18px;">👤 目前詢問：${patientLabel} 傷患（第 ${state.currentPatientIdx + 1}/${state.patientCount} 位）</strong>
+    </div>`;
+  }
 
   // Show completed question log
   if (state.log.length > 2) {
@@ -1346,11 +1443,13 @@ function renderDetailQuestions() {
     </div>`;
   }
 
-  // Current question
+  // Current question — prefix with patient label for multi-patient
+  const questionPrefix = (state.patientCount > 1) ?
+    `${String.fromCharCode(65 + state.currentPatientIdx)}患者：` : '';
   html += `
     <div class="card">
       <div class="card-step">步驟 4 — 機轉追問 (${currentIdx + 1}/${tree.length})</div>
-      <div class="card-title">${currentQ.question}</div>
+      <div class="card-title">${questionPrefix}${currentQ.question}</div>
       ${currentQ.hint ? `<div class="card-hint">💡 ${currentQ.hint}</div>` : ''}
   `;
 
@@ -1359,7 +1458,7 @@ function renderDetailQuestions() {
       html += `
         <div class="yn-grid">
           <button class="yn-btn yes-btn" onclick="answerYN('${currentQ.id}', true)">✅ 是</button>
-          <button class="yn-btn no-btn" onclick="answerYN('${currentQ.id}', false)">❌ 否 / 不確定</button>
+          <button class="yn-btn no-btn" onclick="answerYN('${currentQ.id}', false)">❌ 否</button>
         </div>
       `;
       break;
@@ -1407,6 +1506,11 @@ function answerYN(id, isYes) {
   if (isYes && q.onYes) q.onYes();
   if (!isYes && q.onNo) q.onNo();
 
+  // Track per-patient consciousness for consciousness questions
+  if (id.endsWith('_conscious') && state.patientCount > 1 && state.currentPatientIdx < state.patients.length) {
+    state.patients[state.currentPatientIdx].conscious = isYes;
+  }
+
   state.subStep++;
   render();
 }
@@ -1450,6 +1554,29 @@ function skipQuestion() {
 }
 
 function finishEarly() {
+  // Save current patient data for multi-patient
+  if (state.patientCount > 1 && state.currentPatientIdx < state.patients.length) {
+    const cp = state.patients[state.currentPatientIdx];
+    cp.gender = state.gender;
+    cp.age = state.age;
+    cp.vehType = state.subAnswers.vehType || '';
+    if (cp.conscious === null) cp.conscious = true;
+    if (state.isMajor) cp.isMajor = true;
+  }
+  // Merge all patient findings back into global state for summary
+  if (state.patientCount > 1 && state.patients.length > 0) {
+    state.findings = [];
+    state.patients.forEach(p => {
+      (p.findings || []).forEach(f => {
+        if (!state.findings.includes(f)) state.findings.push(f);
+      });
+    });
+    // Restore global isMajor if any patient is major
+    state.isMajor = state.patients.some(p => p.isMajor);
+    if (state.isMajor) state.dispatchLevel = 'critical';
+    // Final recalc of stacked vehicles
+    recalcVehicles();
+  }
   state.step = 'summary';
   render();
 }
@@ -1463,6 +1590,23 @@ function renderSummary() {
   const vehicleDesc = [];
   vehicleDesc.push(`🚑 救護車 × ${state.vehicles.ambulance}`);
   if (state.vehicles.rescue > 0) vehicleDesc.push(`🚒 救災車 × ${state.vehicles.rescue}`);
+  if (state.vehicles.specialSearch > 0) vehicleDesc.push(`🔍 特搜車 × ${state.vehicles.specialSearch}`);
+
+  // For single patient, save data to patients array for uniform handling
+  if (state.patientCount === 1 && state.patients.length === 0) {
+    const hasUnconsciousF = state.findings.some(f => f.includes('無意識'));
+    state.patients = [{
+      label: 'A',
+      gender: state.gender,
+      age: state.age,
+      vehType: state.subAnswers.vehType || '',
+      conscious: hasUnconsciousF ? false : true,
+      findings: [...state.findings],
+      isMajor: state.isMajor,
+      needRescue: state.vehicles.rescue > 0,
+      needSpecialSearch: state.vehicles.specialSearch > 0,
+    }];
+  }
 
   let html = `
     <div class="summary-section">
@@ -1479,14 +1623,28 @@ function renderSummary() {
           <div class="s-label">患者人數</div>
           <div class="s-value">${state.patientCount} 人</div>
         </div>
-        <div class="summary-item">
-          <div class="s-label">患者性別</div>
-          <div class="s-value">${state.gender || '不詳'}</div>
-        </div>
-        <div class="summary-item">
-          <div class="s-label">患者年紀</div>
-          <div class="s-value">${state.age || '不詳'}</div>
-        </div>
+        ${state.patientCount > 1 && state.patients.length > 0 ?
+          state.patients.map(p => {
+            const vLabel = p.vehType ? ('（' + ({'car':'汽車','moto':'機車','bike':'自行車','pedestrian':'行人','truck':'大型車輛'}[p.vehType] || p.vehType) + '）') : '';
+            const consciousLabel = p.conscious === false ? ' 🔴無意識' : ' 🟢清醒';
+            const majorLabel = p.isMajor ? ' 🚨重大外傷' : '';
+            const pFindings = (p.findings || []).filter(f => !f.includes('無意識'));
+            const conditionStr = pFindings.length > 0 ? '<br><span style="font-size:13px;color:var(--gray-500)">' + pFindings.join('、') + '</span>' : '';
+            return `
+            <div class="summary-item" style="grid-column: span 2">
+              <div class="s-label">${p.label} 傷患${majorLabel}</div>
+              <div class="s-value">${p.gender || '不詳'}，${p.age || '不詳'}${vLabel}，${consciousLabel}${conditionStr}</div>
+            </div>
+          `}).join('') :
+          `<div class="summary-item">
+            <div class="s-label">患者性別</div>
+            <div class="s-value">${state.gender || '不詳'}</div>
+          </div>
+          <div class="summary-item">
+            <div class="s-label">患者年紀</div>
+            <div class="s-value">${state.age || '不詳'}</div>
+          </div>`
+        }
         <div class="summary-item">
           <div class="s-label">事故類型</div>
           <div class="s-value">${typeName}</div>
@@ -1499,14 +1657,34 @@ function renderSummary() {
   `;
 
   if (state.findings.length > 0) {
-    html += `
-      <div class="key-findings">
-        <h4>🔑 關鍵發現（判定依據）</h4>
-        <ul>
-          ${state.findings.map(f => `<li>${f}</li>`).join('')}
-        </ul>
-      </div>
-    `;
+    if (state.patientCount > 1 && state.patients.length > 0) {
+      html += `<div class="key-findings">
+        <h4>🔑 關鍵發現（判定依據）</h4>`;
+      state.patients.forEach(p => {
+        if (p.findings && p.findings.length > 0) {
+          html += `<div style="margin-top:8px"><strong>${p.label} 傷患：</strong><ul>
+            ${p.findings.map(f => `<li>${f}</li>`).join('')}
+          </ul></div>`;
+        }
+      });
+      const allPatientFindings = state.patients.flatMap(p => p.findings || []);
+      const globalOnly = state.findings.filter(f => !allPatientFindings.includes(f));
+      if (globalOnly.length > 0) {
+        html += `<div style="margin-top:8px"><strong>整體：</strong><ul>
+          ${globalOnly.map(f => `<li>${f}</li>`).join('')}
+        </ul></div>`;
+      }
+      html += `</div>`;
+    } else {
+      html += `
+        <div class="key-findings">
+          <h4>🔑 關鍵發現（判定依據）</h4>
+          <ul>
+            ${state.findings.map(f => `<li>${f}</li>`).join('')}
+          </ul>
+        </div>
+      `;
+    }
   }
 
   // Full Q&A log
@@ -1523,52 +1701,83 @@ function renderSummary() {
   `;
 
   // Dispatch recommendation details
+  const majorPatientCount = state.patients.length > 0 ? state.patients.filter(p => p.isMajor).length : (state.isMajor ? 1 : 0);
+  const nonMajorPatientCount = state.patientCount - majorPatientCount;
+  const ambulanceBreakdown = (state.patientCount > 1 && majorPatientCount > 0) ?
+    `<br><span style="font-size:12px;color:var(--gray-500)">（重大外傷 ${majorPatientCount} 人 × 2 輛 + 一般 ${nonMajorPatientCount} 人 × 1 輛 = ${state.vehicles.ambulance} 輛）</span>` : '';
+
   html += `
     <div style="margin-top:20px; padding:16px; background:var(--primary-light); border-radius:var(--radius); border:1px solid var(--primary);">
       <h4 style="color:var(--primary);margin-bottom:8px">🚑 派遣建議明細</h4>
       <table style="width:100%;border-collapse:collapse;">
         <tr style="border-bottom:1px solid var(--gray-200)">
           <td style="padding:8px;font-weight:600">救護車</td>
-          <td style="padding:8px">${state.vehicles.ambulance} 輛${state.vehicles.ambulance >= 2 ? ' ⚠️ 加派' : ''}</td>
+          <td style="padding:8px">${state.vehicles.ambulance} 輛${state.vehicles.ambulance >= 2 ? ' ⚠️ 加派' : ''}${ambulanceBreakdown}</td>
         </tr>
         <tr style="border-bottom:1px solid var(--gray-200)">
           <td style="padding:8px;font-weight:600">救災車</td>
           <td style="padding:8px">${state.vehicles.rescue > 0 ? state.vehicles.rescue + ' 輛 ⚠️ 加派' : '不需要'}</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--gray-200)">
+          <td style="padding:8px;font-weight:600">特搜車</td>
+          <td style="padding:8px">${state.vehicles.specialSearch > 0 ? state.vehicles.specialSearch + ' 輛 ⚠️ 加派' : '不需要'}</td>
         </tr>
       </table>
     </div>
   `;
 
   // === Plain text summary for copy/paste (concise one-liner) ===
+  const vehTypeLabels = { 'car': '汽車', 'moto': '機車', 'bike': '自行車', 'pedestrian': '行人', 'truck': '大型車輛' };
   const parts = [];
   parts.push(`受傷人數${state.patientCount}人`);
 
-  // Consciousness: check findings for 無意識 or OHCA
+  // Consciousness: check findings for 無意識 or OHCA (single patient only; multi-patient shown per-patient)
   if (state.isOHCA) {
     parts.push('OHCA');
-  } else if (state.findings.some(f => f.includes('無意識'))) {
-    parts.push('無意識');
-  } else {
-    parts.push('清醒');
+  } else if (state.patientCount <= 1) {
+    if (state.findings.some(f => f.includes('無意識'))) {
+      parts.push('無意識');
+    } else {
+      parts.push('清醒');
+    }
   }
 
   // Incident type
   parts.push(typeName);
 
-  // Key findings (concise)
-  state.findings.forEach(f => {
-    // Skip consciousness-related findings (already handled above)
-    if (f.includes('無意識')) return;
-    parts.push(f);
-  });
+  // Vehicle type for car accidents (single patient)
+  if (state.incidentType === 'vehicle' && state.patientCount <= 1 && state.subAnswers.vehType) {
+    parts.push(`涉及車輛：${vehTypeLabels[state.subAnswers.vehType] || state.subAnswers.vehType}`);
+  }
+
+  // Per-patient info for multi-patient
+  if (state.patientCount > 1 && state.patients.length > 0) {
+    state.patients.forEach(p => {
+      const pVeh = (state.incidentType === 'vehicle' && p.vehType) ? `，${vehTypeLabels[p.vehType] || p.vehType}` : '';
+      const consciousText = p.conscious === false ? '無意識' : '清醒';
+      const pParts = [`${p.label}傷患：${p.gender || '不詳'}，${p.age || '不詳'}${pVeh}，${consciousText}`];
+      if (p.findings && p.findings.length > 0) {
+        p.findings.forEach(f => {
+          if (!f.includes('無意識')) pParts.push(f);
+        });
+      }
+      parts.push(pParts.join('，'));
+    });
+  } else {
+    // Gender & Age for single patient
+    parts.push(`性別${state.gender || '不詳'}`);
+    parts.push(`年齡${state.age || ''}歲`);
+    // Key findings (concise)
+    state.findings.forEach(f => {
+      if (f.includes('無意識')) return;
+      parts.push(f);
+    });
+  }
 
   // Dispatch vehicles
   parts.push(`派救護${state.vehicles.ambulance}車`);
   if (state.vehicles.rescue > 0) parts.push(`派救災${state.vehicles.rescue}車`);
-
-  // Gender & Age
-  parts.push(`性別${state.gender || '不詳'}`);
-  parts.push(`年齡${state.age || ''}歲`);
+  if (state.vehicles.specialSearch > 0) parts.push(`派特搜${state.vehicles.specialSearch}車`);
 
   const plainText = parts.join('，');
 
