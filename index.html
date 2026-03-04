@@ -737,6 +737,12 @@ const questionTrees = {
       condition: () => state.findings.includes('機具穿刺重要部位'),
       onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
     },
+    {
+      id: 'mach_conscious',
+      question: '患者目前是否有意識？',
+      type: 'yn',
+      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
+    },
   ],
 
   crush: [
