@@ -611,7 +611,33 @@ const questionTrees = {
         { label: '🚶 行人', value: 'pedestrian' },
         { label: '🚛 大型車輛', value: 'truck' },
       ],
-      onSelect: (v) => { state.subAnswers.vehType = v; },
+      onSelect: (v) => {
+        state.subAnswers.vehType = v;
+        if (v === 'truck') {
+          addFinding('涉及大型車輛，需加派特搜車');
+          addVehicle('specialSearch');
+        }
+      },
+    },
+    {
+      id: 'veh_pedestrian_other_vehicle',
+      question: '對方是什麼車輛？',
+      hint: '若對方為大型車輛，需加派特搜車',
+      type: 'choice',
+      options: [
+        { label: '🚗 汽車', value: 'car' },
+        { label: '🏍️ 機車', value: 'moto' },
+        { label: '🚛 大型車輛（公車、貨車、聯結車等）', value: 'truck' },
+        { label: '❓ 不詳/無法確認', value: 'unknown' },
+      ],
+      condition: () => state.subAnswers.vehType === 'pedestrian',
+      onSelect: (v) => {
+        state.subAnswers.otherVehType = v;
+        if (v === 'truck') {
+          addFinding('對方為大型車輛，需加派特搜車');
+          addVehicle('specialSearch');
+        }
+      },
     },
     {
       id: 'veh_overturn',
