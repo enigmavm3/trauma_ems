@@ -613,16 +613,12 @@ const questionTrees = {
       ],
       onSelect: (v) => {
         state.subAnswers.vehType = v;
-        if (v === 'truck') {
-          addFinding('涉及大型車輛，需加派特搜車');
-          addVehicle('specialSearch');
-        }
       },
     },
     {
       id: 'veh_pedestrian_other_vehicle',
       question: '對方是什麼車輛？',
-      hint: '若對方為大型車輛，需加派特搜車',
+      hint: '若對方為大型車輛且患者受困，需加派特搜車',
       type: 'choice',
       options: [
         { label: '🚗 汽車', value: 'car' },
@@ -633,10 +629,6 @@ const questionTrees = {
       condition: () => state.subAnswers.vehType === 'pedestrian',
       onSelect: (v) => {
         state.subAnswers.otherVehType = v;
-        if (v === 'truck') {
-          addFinding('對方為大型車輛，需加派特搜車');
-          addVehicle('specialSearch');
-        }
       },
     },
     {
@@ -673,14 +665,32 @@ const questionTrees = {
       id: 'veh_under',
       question: '患者身體是否還壓在車下出不來？',
       type: 'yn',
-      onYes: () => { addFinding('患者壓在車下'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+      onYes: () => {
+        addFinding('患者壓在車下');
+        setMajor();
+        addAmbulance();
+        addVehicle('rescue');
+        if (state.subAnswers.vehType === 'truck' || state.subAnswers.otherVehType === 'truck') {
+          addFinding('受困於大型車輛，需加派特搜車');
+          addVehicle('specialSearch');
+        }
+      },
     },
     {
       id: 'veh_deform',
       question: '患者是否因車輛變形受困車內？',
       type: 'yn',
       condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
-      onYes: () => { addFinding('車輛變形，患者受困車內'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+      onYes: () => {
+        addFinding('車輛變形，患者受困車內');
+        setMajor();
+        addAmbulance();
+        addVehicle('rescue');
+        if (state.subAnswers.vehType === 'truck') {
+          addFinding('受困於大型車輛，需加派特搜車');
+          addVehicle('specialSearch');
+        }
+      },
     },
     {
       id: 'veh_multi_ohca',
