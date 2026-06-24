@@ -500,6 +500,7 @@ const state = {
   startTime: Date.now(),
   currentPatientIdx: 0,
   patients: [],
+  conscious: null, // 單人意識狀態：true=清醒, false=無意識, null=意識未知（跳過或未詢問）
 };
 
 // ===== TIMER =====
@@ -983,6 +984,14 @@ function addAmbulance() {
   recalcVehicles();
 }
 
+// 意識三態 → 顯示文字。true=清醒, false=無意識, null/undefined=意識未知（跳過或未詢問）
+function consciousnessText(c) {
+  return c === false ? '無意識' : (c === true ? '清醒' : '意識未知');
+}
+function consciousnessBadge(c) {
+  return c === false ? ' 🔴無意識' : (c === true ? ' 🟢清醒' : ' ⚪意識未知');
+}
+
 function addVehicle(type) {
   if (state.patientCount > 1 && state.patients.length > 0 && state.currentPatientIdx < state.patients.length) {
     if (type === 'rescue') state.patients[state.currentPatientIdx].needRescue = true;
@@ -1200,11 +1209,12 @@ function handleOHCAYes() {
   state.isOHCA = true;
   state.isMajor = true;
   state.dispatchLevel = 'critical';
+  state.conscious = false; // OHCA（無呼吸心跳）即為無意識
   // OHCA: each patient needs 2 ambulances (stacked)
   state.vehicles.ambulance = Math.max(2, state.patientCount * 2);
   // Mark all patients as major for OHCA
   if (state.patients.length > 0) {
-    state.patients.forEach(p => p.isMajor = true);
+    state.patients.forEach(p => { p.isMajor = true; p.conscious = false; });
   }
   addFinding('患者 OHCA');
   addLog('是否 OHCA', '是 → 立即派遣雙車');
@@ -1426,7 +1436,7 @@ function renderDetailQuestions() {
         cp.gender = state.gender;
         cp.age = state.age;
         cp.vehType = state.subAnswers.vehType || '';
-        if (cp.conscious === null) cp.conscious = true; // default conscious if not marked otherwise
+        // 意識題若被跳過/未詢問，conscious 維持 null → 顯示「意識未知」
         // Save per-patient major/vehicle flags
         if (state.isMajor) cp.isMajor = true;
       }
@@ -1556,9 +1566,12 @@ function answerYN(id, isYes) {
   if (isYes && q.onYes) q.onYes();
   if (!isYes && q.onNo) q.onNo();
 
-  // Track per-patient consciousness for consciousness questions
-  if (id.endsWith('_conscious') && state.patientCount > 1 && state.currentPatientIdx < state.patients.length) {
-    state.patients[state.currentPatientIdx].conscious = isYes;
+  // Track consciousness for consciousness questions (global + per-patient)
+  if (id.endsWith('_conscious')) {
+    state.conscious = isYes;
+    if (state.patientCount > 1 && state.currentPatientIdx < state.patients.length) {
+      state.patients[state.currentPatientIdx].conscious = isYes;
+    }
   }
 
   state.subStep++;
@@ -1610,7 +1623,6 @@ function finishEarly() {
     cp.gender = state.gender;
     cp.age = state.age;
     cp.vehType = state.subAnswers.vehType || '';
-    if (cp.conscious === null) cp.conscious = true;
     if (state.isMajor) cp.isMajor = true;
   }
   // Merge all patient findings back into global state for summary
@@ -1650,7 +1662,7 @@ function renderSummary() {
       gender: state.gender,
       age: state.age,
       vehType: state.subAnswers.vehType || '',
-      conscious: hasUnconsciousF ? false : true,
+      conscious: hasUnconsciousF ? false : state.conscious,
       findings: [...state.findings],
       isMajor: state.isMajor,
       needRescue: state.vehicles.rescue > 0,
@@ -1676,7 +1688,7 @@ function renderSummary() {
         ${state.patientCount > 1 && state.patients.length > 0 ?
           state.patients.map(p => {
             const vLabel = p.vehType ? ('（' + ({'car':'汽車','moto':'機車','bike':'自行車','pedestrian':'行人','truck':'大型車輛'}[p.vehType] || p.vehType) + '）') : '';
-            const consciousLabel = p.conscious === false ? ' 🔴無意識' : ' 🟢清醒';
+            const consciousLabel = consciousnessBadge(p.conscious);
             const majorLabel = p.isMajor ? ' 🚨重大外傷' : '';
             const pFindings = (p.findings || []).filter(f => !f.includes('無意識'));
             const conditionStr = pFindings.length > 0 ? '<br><span style="font-size:13px;color:var(--gray-500)">' + pFindings.join('、') + '</span>' : '';
@@ -1785,11 +1797,8 @@ function renderSummary() {
   if (state.isOHCA) {
     parts.push('OHCA');
   } else if (state.patientCount <= 1) {
-    if (state.findings.some(f => f.includes('無意識'))) {
-      parts.push('無意識');
-    } else {
-      parts.push('清醒');
-    }
+    const c = state.findings.some(f => f.includes('無意識')) ? false : state.conscious;
+    parts.push(consciousnessText(c));
   }
 
   // Incident type
@@ -1804,7 +1813,7 @@ function renderSummary() {
   if (state.patientCount > 1 && state.patients.length > 0) {
     state.patients.forEach(p => {
       const pVeh = (state.incidentType === 'vehicle' && p.vehType) ? `，${vehTypeLabels[p.vehType] || p.vehType}` : '';
-      const consciousText = p.conscious === false ? '無意識' : '清醒';
+      const consciousText = consciousnessText(p.conscious);
       const pParts = [`${p.label}傷患：${p.gender || '不詳'}，${p.age || '不詳'}${pVeh}，${consciousText}`];
       if (p.findings && p.findings.length > 0) {
         p.findings.forEach(f => {
