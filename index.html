@@ -521,9 +521,52 @@ const incidentTypes = [
   { id: 'other', label: '其他外傷', icon: '🩹', sub: '電擊傷、其他創傷等' },
 ];
 
+// ===== 外觀出血評估（每位傷患都要逐一問，故置於各機轉問題樹之首）=====
+// 流程：外觀大出血？ → 有 → 全身/滿地都是血？ → 是 → 二車（同 OHCA 等級）
+//                                            → 否 → 續問頸/胸/腹穿刺傷
+//                    → 否 → 頸/胸/腹穿刺傷？ → 是 → 二車
+const bleedingQuestions = [
+  {
+    id: 'bleed_massive',
+    question: '外觀是否大出血？',
+    hint: '請報案者看患者外觀與周遭地面的出血狀況',
+    type: 'yn',
+    onYes: () => { state.subAnswers.bleedMassive = true; },
+    onNo: () => { state.subAnswers.bleedMassive = false; },
+  },
+  {
+    id: 'bleed_soaked',
+    question: '全身都是血／滿地都是血？',
+    hint: '⚠️ 若是，等同 OHCA 等級提示：立即派遣二車',
+    type: 'yn',
+    condition: () => state.subAnswers.bleedMassive === true,
+    onYes: () => {
+      state.subAnswers.bleedSoaked = true;
+      addFinding('🩸 全身／滿地都是血（大量外出血）');
+      setMajor(); addAmbulance();
+      alert('🚨 全身／滿地都是血 → 立即派遣二車（同 OHCA 等級）');
+    },
+    onNo: () => { state.subAnswers.bleedSoaked = false; },
+  },
+  {
+    id: 'bleed_penetrating',
+    question: '是否為頸部／胸部／腹部穿刺傷？',
+    hint: '⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車',
+    type: 'yn',
+    // 「滿地都是血」已判定二車者不再追問；其餘（大出血=否、或大出血=是但非滿地）都要問
+    condition: () => state.subAnswers.bleedSoaked !== true,
+    onYes: () => {
+      addFinding('頸部/胸部/腹部穿刺傷');
+      setMajor(); addAmbulance();
+      alert('🚨 頸/胸/腹穿刺傷 → 派遣二車');
+    },
+  },
+];
+
 // ===== QUESTION TREES =====
 const questionTrees = {
   fall: [
+    ...bleedingQuestions,
     {
       id: 'fall_trapped',
       question: '患者是否有受困或卡住？需不需要搜救器材？',
@@ -582,6 +625,7 @@ const questionTrees = {
   ],
 
   vehicle: [
+    ...bleedingQuestions,
     {
       id: 'veh_gender',
       question: '患者性別？',
@@ -711,6 +755,7 @@ const questionTrees = {
   ],
 
   machine: [
+    ...bleedingQuestions,
     {
       id: 'mach_what',
       question: '是什麼機器造成的傷害？',
@@ -791,6 +836,7 @@ const questionTrees = {
   ],
 
   crush: [
+    ...bleedingQuestions,
     {
       id: 'crush_trapped',
       question: '患者是否受困？',
@@ -858,6 +904,7 @@ const questionTrees = {
   ],
 
   stab: [
+    ...bleedingQuestions,
     {
       id: 'stab_gender',
       question: '患者性別？',
@@ -913,6 +960,7 @@ const questionTrees = {
   ],
 
   other: [
+    ...bleedingQuestions,
     {
       id: 'other_gender',
       question: '患者性別？',
@@ -1064,7 +1112,7 @@ function render() {
   let html = '';
 
   // Progress bar
-  const steps = ['basic', 'ohca_check', 'bleeding_check', 'ohca_detail', 'incident_type', 'detail_questions', 'summary'];
+  const steps = ['basic', 'ohca_check', 'ohca_detail', 'incident_type', 'detail_questions', 'summary'];
   const currentIdx = steps.indexOf(state.step);
   const progress = state.step === 'summary' ? 100 : Math.max(10, ((currentIdx + 1) / steps.length) * 100);
   html += `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>`;
@@ -1077,7 +1125,6 @@ function render() {
     case 'basic': html += renderBasicInfo(); break;
     case 'ohca_check': html += renderOHCACheck(); break;
     case 'ohca_detail': html += renderOHCADetail(); break;
-    case 'bleeding_check': html += renderBleedingCheck(); break;
     case 'incident_type': html += renderIncidentType(); break;
     case 'detail_questions': html += renderDetailQuestions(); break;
     case 'summary': html += renderSummary(); break;
@@ -1120,7 +1167,7 @@ function renderDispatchBanner() {
 function renderBasicInfo() {
   return `
     <div class="card">
-      <div class="card-step">步驟 1/5</div>
+      <div class="card-step">步驟 1/4</div>
       <div class="card-title">📋 基本資訊</div>
       <div class="card-desc">請先確認案件基本資訊</div>
 
@@ -1189,7 +1236,7 @@ function renderOHCACheck() {
     </div>
 
     <div class="card">
-      <div class="card-step">步驟 2/5</div>
+      <div class="card-step">步驟 2/4</div>
       <div class="card-title">💔 OHCA 確認</div>
       <div class="card-desc">患者是否已無呼吸心跳（OHCA）？</div>
       <div class="card-hint">
@@ -1227,117 +1274,6 @@ function handleOHCAYes() {
 
 function handleOHCANo() {
   addLog('是否 OHCA', '否');
-  state.subAnswers.bleedStep = 0;
-  state.step = 'bleeding_check';
-  render();
-}
-
-// ===== 外觀出血評估（OHCA 之後、選機轉之前，所有創傷機轉共用）=====
-// bleedStep: 0=外觀是否大出血 / 1=全身都是血 / 2=頸胸腹穿刺傷
-function renderBleedingCheck() {
-  const step = state.subAnswers.bleedStep || 0;
-
-  let html = `
-    <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊 → OHCA 確認 ✓（否）</div></div>
-    </div>
-  `;
-
-  // 已記錄的出血相關回答
-  const bleedLog = state.log.filter(l => ['外觀是否大出血', '是否全身都是血', '是否為頸/胸/腹穿刺傷'].includes(l.q));
-  if (bleedLog.length > 0) {
-    html += `<div class="card" style="padding:16px">
-      <div style="font-size:14px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">📝 已記錄的回答</div>
-      ${bleedLog.map(l => `
-        <div class="log-entry">
-          <span class="q">${l.q}</span>
-          <span class="a">${l.a}</span>
-        </div>
-      `).join('')}
-    </div>`;
-  }
-
-  if (step === 0) {
-    html += `
-      <div class="card">
-        <div class="card-step">步驟 3/5 — 出血評估 (1/2)</div>
-        <div class="card-title">🩸 外觀是否大出血？</div>
-        <div class="card-hint">💡 請報案者看患者「外觀」與周遭地面的出血狀況</div>
-        <div class="yn-grid">
-          <button class="yn-btn yes-btn" onclick="bleedMassive(true)">✅ 有</button>
-          <button class="yn-btn no-btn" onclick="bleedMassive(false)">❌ 否</button>
-        </div>
-      </div>
-    `;
-  } else if (step === 1) {
-    html += `
-      <div class="card">
-        <div class="card-step">步驟 3/5 — 出血評估 (2/2)</div>
-        <div class="card-title">🩸 全身都是血／滿地都是血？</div>
-        <div class="card-hint">⚠️ 若是，等同 OHCA 等級提示：立即派遣二車</div>
-        <div class="yn-grid">
-          <button class="yn-btn yes-btn" onclick="bleedSoaked(true)">✅ 是</button>
-          <button class="yn-btn no-btn" onclick="bleedSoaked(false)">❌ 否</button>
-        </div>
-      </div>
-    `;
-  } else {
-    html += `
-      <div class="card">
-        <div class="card-step">步驟 3/5 — 出血評估 (2/2)</div>
-        <div class="card-title">🔪 是否為頸部／胸部／腹部穿刺傷？</div>
-        <div class="card-hint">⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車</div>
-        <div class="yn-grid">
-          <button class="yn-btn yes-btn" onclick="bleedPenetrating(true)">✅ 是</button>
-          <button class="yn-btn no-btn" onclick="bleedPenetrating(false)">❌ 否</button>
-        </div>
-      </div>
-    `;
-  }
-
-  return html;
-}
-
-function bleedMassive(yes) {
-  if (yes) {
-    addLog('外觀是否大出血', '有');
-    state.subAnswers.bleedStep = 1;   // → 全身都是血？
-  } else {
-    addLog('外觀是否大出血', '否');
-    state.subAnswers.bleedStep = 2;   // → 頸/胸/腹穿刺傷？
-  }
-  render();
-}
-
-function bleedSoaked(yes) {
-  if (yes) {
-    addFinding('🩸 全身／滿地都是血（大量外出血）');
-    setMajor();
-    addAmbulance();
-    addLog('是否全身都是血', '是 → 立即派遣二車');
-    alert('🚨 全身／滿地都是血 → 立即派遣二車（同 OHCA 等級）');
-    goToIncidentType();
-  } else {
-    addLog('是否全身都是血', '否');
-    state.subAnswers.bleedStep = 2;   // → 仍需確認頸/胸/腹穿刺傷
-    render();
-  }
-}
-
-function bleedPenetrating(yes) {
-  if (yes) {
-    addFinding('頸部/胸部/腹部穿刺傷');
-    setMajor();
-    addAmbulance();
-    addLog('是否為頸/胸/腹穿刺傷', '是 → 派遣二車');
-    alert('🚨 頸/胸/腹穿刺傷 → 派遣二車');
-  } else {
-    addLog('是否為頸/胸/腹穿刺傷', '否');
-  }
-  goToIncidentType();
-}
-
-function goToIncidentType() {
   state.step = 'incident_type';
   render();
 }
@@ -1486,11 +1422,11 @@ function ohcaDetailHeavyVehicle(yes) {
 function renderIncidentType() {
   return `
     <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊 + OHCA 確認 + 出血評估 ✓</div></div>
+      <div class="card-header"><div class="card-title">📋 基本資訊 + OHCA 確認</div></div>
     </div>
 
     <div class="card">
-      <div class="card-step">步驟 4/5</div>
+      <div class="card-step">步驟 3/4</div>
       <div class="card-title">🔍 事故類型辨識</div>
       <div class="card-desc">辨識為外科後，請選擇受傷機轉類型：</div>
       <div class="choice-grid">
@@ -1560,6 +1496,9 @@ function renderDetailQuestions() {
         state.age = '';
         state.subAnswers.vehType = '';
         state.subAnswers.isChild = undefined;
+        // 出血評估逐一傷患詢問，換人時要清掉上一位的答案
+        state.subAnswers.bleedMassive = undefined;
+        state.subAnswers.bleedSoaked = undefined;
         // Reset findings and isMajor for next patient (per-patient data already saved)
         state.findings = [];
         state.isMajor = false;
@@ -1621,7 +1560,7 @@ function renderDetailQuestions() {
     `${String.fromCharCode(65 + state.currentPatientIdx)}患者：` : '';
   html += `
     <div class="card">
-      <div class="card-step">步驟 5 — 機轉追問 (${currentIdx + 1}/${tree.length})</div>
+      <div class="card-step">步驟 4 — 機轉追問 (${currentIdx + 1}/${tree.length})</div>
       <div class="card-title">${questionPrefix}${currentQ.question}</div>
       ${currentQ.hint ? `<div class="card-hint">💡 ${currentQ.hint}</div>` : ''}
   `;
