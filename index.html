@@ -522,39 +522,29 @@ const incidentTypes = [
 ];
 
 // ===== 外觀出血評估（每位傷患都要逐一問，故置於各機轉問題樹之首）=====
-// 流程：外觀大出血？ → 有 → 全身/滿地都是血？ → 是 → 二車（同 OHCA 等級）
-//                                            → 否 → 續問頸/胸/腹穿刺傷
-//                    → 否 → 頸/胸/腹穿刺傷？ → 是 → 二車
+// 流程：外觀大出血（全身都是血／滿地都是血）？ → 是 → 二車（同 OHCA 等級）
+//                                            → 否 → 頸/胸/腹穿刺傷？ → 是 → 二車
 const bleedingQuestions = [
   {
     id: 'bleed_massive',
     question: '外觀是否大出血？',
-    hint: '請報案者看患者外觀與周遭地面的出血狀況',
+    hint: '詢問是否全身都是血或是滿地都是血；⚠️ 若是，等同 OHCA 等級提示：立即派遣二車',
     type: 'yn',
-    onYes: () => { state.subAnswers.bleedMassive = true; },
-    onNo: () => { state.subAnswers.bleedMassive = false; },
-  },
-  {
-    id: 'bleed_soaked',
-    question: '全身都是血／滿地都是血？',
-    hint: '⚠️ 若是，等同 OHCA 等級提示：立即派遣二車',
-    type: 'yn',
-    condition: () => state.subAnswers.bleedMassive === true,
     onYes: () => {
-      state.subAnswers.bleedSoaked = true;
+      state.subAnswers.bleedMassive = true;
       addFinding('🩸 全身／滿地都是血（大量外出血）');
       setMajor(); addAmbulance();
       alert('🚨 全身／滿地都是血 → 立即派遣二車（同 OHCA 等級）');
     },
-    onNo: () => { state.subAnswers.bleedSoaked = false; },
+    onNo: () => { state.subAnswers.bleedMassive = false; },
   },
   {
     id: 'bleed_penetrating',
     question: '是否為頸部／胸部／腹部穿刺傷？',
     hint: '⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車',
     type: 'yn',
-    // 「滿地都是血」已判定二車者不再追問；其餘（大出血=否、或大出血=是但非滿地）都要問
-    condition: () => state.subAnswers.bleedSoaked !== true,
+    // 大出血已判定二車者不再追問；大出血=否者仍要問
+    condition: () => state.subAnswers.bleedMassive !== true,
     onYes: () => {
       addFinding('頸部/胸部/腹部穿刺傷');
       setMajor(); addAmbulance();
@@ -1238,7 +1228,7 @@ function renderOHCACheck() {
     <div class="card">
       <div class="card-step">步驟 2/4</div>
       <div class="card-title">💔 OHCA 確認</div>
-      <div class="card-desc">患者是否已無呼吸心跳（OHCA）？</div>
+      <div class="card-desc">是否已無意識呼吸（OHCA）？</div>
       <div class="card-hint">
         ⚠️ 若患者為 OHCA，將立即派遣雙車，不需進一步評估機轉。
       </div>
@@ -1498,7 +1488,6 @@ function renderDetailQuestions() {
         state.subAnswers.isChild = undefined;
         // 出血評估逐一傷患詢問，換人時要清掉上一位的答案
         state.subAnswers.bleedMassive = undefined;
-        state.subAnswers.bleedSoaked = undefined;
         // Reset findings and isMajor for next patient (per-patient data already saved)
         state.findings = [];
         state.isMajor = false;
