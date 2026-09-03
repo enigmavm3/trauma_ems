@@ -526,7 +526,9 @@ const incidentTypes = [
 
 // ===== 外觀出血評估（每位傷患都要逐一問，故置於各機轉問題樹之首）=====
 // 流程：外觀大出血（全身都是血／滿地都是血）？ → 是 → 二車（同 OHCA 等級）
-//                                            → 否 → 頸/胸/腹穿刺傷？ → 是 → 二車
+//                                            → 否 → 頸/胸/腹/背穿刺傷？ → 是 → 二車
+// 穿刺傷的追問（湧出血水／器官外露）定義於機器設備與刀傷兩個機轉樹，
+// 以 subAnswers.bleedPenetrating 判斷是否追問。
 const bleedingQuestions = [
   {
     id: 'bleed_massive',
@@ -543,16 +545,18 @@ const bleedingQuestions = [
   },
   {
     id: 'bleed_penetrating',
-    question: '是否為頸部／胸部／腹部穿刺傷？',
+    question: '是否為頸部／胸部／腹部／背部穿刺傷？',
     hint: '⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車',
     type: 'yn',
     // 大出血已判定二車者不再追問；大出血=否者仍要問
     condition: () => state.subAnswers.bleedMassive !== true,
     onYes: () => {
-      addFinding('頸部/胸部/腹部穿刺傷');
+      state.subAnswers.bleedPenetrating = true;
+      addFinding('頸部/胸部/腹部/背部穿刺傷');
       setMajor(); addAmbulance();
-      alert('🚨 頸/胸/腹穿刺傷 → 派遣二車');
+      alert('🚨 頸/胸/腹/背穿刺傷 → 派遣二車');
     },
+    onNo: () => { state.subAnswers.bleedPenetrating = false; },
   },
 ];
 
@@ -750,6 +754,21 @@ const questionTrees = {
 
   machine: [
     ...bleedingQuestions,
+    // 穿刺部位題與共用的「頸/胸/腹/背穿刺傷」重複，已合併；追問緊跟在該題之後
+    {
+      id: 'mach_bleeding',
+      question: '穿刺傷口是否持續湧出血水？',
+      type: 'yn',
+      condition: () => state.subAnswers.bleedPenetrating === true,
+      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'mach_organs',
+      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
+      type: 'yn',
+      condition: () => state.subAnswers.bleedPenetrating === true,
+      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
+    },
     {
       id: 'mach_what',
       question: '是什麼機器造成的傷害？',
@@ -800,26 +819,6 @@ const questionTrees = {
       hint: '僅限於手掌或腳掌的不算',
       type: 'yn',
       onYes: () => { addFinding('手腕/腳踝以上截肢'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'mach_penetrate',
-      question: '機具是否穿刺大腿/手肘以上/頭頸部/胸部/腹部/背部？',
-      type: 'yn',
-      onYes: () => { addFinding('機具穿刺重要部位'); },
-    },
-    {
-      id: 'mach_bleeding',
-      question: '穿刺傷口是否持續湧出血水？',
-      type: 'yn',
-      condition: () => state.findings.includes('機具穿刺重要部位'),
-      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'mach_organs',
-      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
-      type: 'yn',
-      condition: () => state.findings.includes('機具穿刺重要部位'),
-      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
     },
     {
       id: 'mach_conscious',
@@ -899,6 +898,21 @@ const questionTrees = {
 
   stab: [
     ...bleedingQuestions,
+    // 穿刺部位題與共用的「頸/胸/腹/背穿刺傷」重複，已合併；追問緊跟在該題之後
+    {
+      id: 'stab_bleeding',
+      question: '傷口是否持續湧出血水？',
+      type: 'yn',
+      condition: () => state.subAnswers.bleedPenetrating === true,
+      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
+    },
+    {
+      id: 'stab_organs',
+      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
+      type: 'yn',
+      condition: () => state.subAnswers.bleedPenetrating === true,
+      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
+    },
     {
       id: 'stab_gender',
       question: '患者性別？',
@@ -923,27 +937,6 @@ const questionTrees = {
       hint: '⚠️ 若是，請告知報案者「不要移除凶器」',
       type: 'yn',
       onYes: () => { addFinding('⚠️ 凶器仍插在患者身上（已提醒勿移除）'); },
-    },
-    {
-      id: 'stab_location',
-      question: '穿刺傷口是否位於頸部/胸部/腹部/背部/大腿？',
-      hint: '這些部位的穿刺傷可能危及生命',
-      type: 'yn',
-      onYes: () => { addFinding('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'stab_bleeding',
-      question: '傷口是否持續湧出血水？',
-      type: 'yn',
-      condition: () => state.findings.includes('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'),
-      onYes: () => { addFinding('傷口持續湧出血水'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'stab_organs',
-      question: '傷口裡面有沒有看到腸子或其他器官掉出來？',
-      type: 'yn',
-      condition: () => state.findings.includes('穿刺傷位於重要部位（頸/胸/腹/背/大腿）'),
-      onYes: () => { addFinding('器官外露'); setMajor(); addAmbulance(); },
     },
     {
       id: 'stab_conscious',
@@ -1612,6 +1605,7 @@ function renderDetailQuestions() {
         state.subAnswers.isChild = undefined;
         // 出血評估逐一傷患詢問，換人時要清掉上一位的答案
         state.subAnswers.bleedMassive = undefined;
+        state.subAnswers.bleedPenetrating = undefined;
         // Reset findings and isMajor for next patient (per-patient data already saved)
         state.findings = [];
         state.isMajor = false;
