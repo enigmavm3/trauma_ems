@@ -488,6 +488,9 @@ const state = {
   patientCount: 1,
   incidentType: '',
   isOHCA: false,
+  ohcaAnswer: null,    // OHCA 確認頁選擇：null=未選, true=是, false=否（按「確認」前可反覆修改）
+  ohcaCount: 1,        // 多人時其中幾位為 OHCA
+  firstAssessIdx: 0,   // 機轉追問從第幾位傷患開始（前面的為 OHCA，不進機轉評估）
   gender: '',
   age: '',
   isMajor: false,
@@ -732,7 +735,8 @@ const questionTrees = {
       question: '如有多位患者，是否其中一人已為 OHCA？',
       hint: '若一人OHCA，同車其他患者也應加派二車',
       type: 'yn',
-      condition: () => state.patientCount > 1,
+      // OHCA 確認頁已回報 OHCA 時不再重複詢問（避免同一狀況加派兩次）
+      condition: () => state.patientCount > 1 && !state.isOHCA,
       onYes: () => { addFinding('同車另一患者為OHCA，本患者加派'); setMajor(); addAmbulance(); },
       scene: true,
     },
@@ -1078,6 +1082,9 @@ function resetAll() {
     patientCount: 1,
     incidentType: '',
     isOHCA: false,
+    ohcaAnswer: null,
+    ohcaCount: 1,
+    firstAssessIdx: 0,
     gender: '',
     age: '',
     isMajor: false,
@@ -1126,6 +1133,27 @@ function render() {
 
 function renderDispatchBanner() {
   let level, icon, text;
+  // 基本資訊／OHCA 確認尚未送出前，依目前的選擇即時預覽派遣量
+  if (state.step === 'basic' || state.step === 'ohca_check') {
+    const n = Math.max(1, state.patientCount);
+    if (state.step === 'ohca_check' && state.ohcaAnswer === true) {
+      const k = Math.min(state.ohcaCount || 1, n);
+      level = 'critical'; icon = '🚨';
+      text = `OHCA ${state.patientCount > 1 ? `${k} 人 ` : ''}— 預計派遣 ${k * 2 + (n - k)} 輛救護車`;
+    } else {
+      level = 'normal'; icon = '🟢';
+      text = `一般派遣 — 預計 ${n} 輛救護車`;
+    }
+    return `
+    <div class="dispatch-banner level-${level}">
+      <span class="icon">${icon}</span>
+      <div class="details">
+        <div class="label">目前派遣建議</div>
+        <div>${text}</div>
+      </div>
+    </div>
+  `;
+  }
   if (state.isOHCA) {
     level = 'critical'; icon = '🚨';
     const ohcaParts = [`${state.vehicles.ambulance} 輛救護車`];
@@ -1187,6 +1215,7 @@ function renderBasicInfo() {
 
 function selectPatientCount(n) {
   state.patientCount = n;
+  if (state.ohcaCount > n) state.ohcaCount = n;
   if (n >= 4) {
     alert('⚠️ 4人以上傷患，建議啟動大量傷患程序！');
   }
@@ -1195,7 +1224,7 @@ function selectPatientCount(n) {
 
 function goToOHCA() {
   addLog('患者人數', `${state.patientCount} 人`);
-  state.vehicles.ambulance = Math.max(state.vehicles.ambulance, state.patientCount);
+  state.vehicles.ambulance = Math.max(1, state.patientCount);
   if (state.patientCount > 1) {
     state.patients = [];
     for (let i = 0; i < state.patientCount; i++) {
@@ -1217,6 +1246,7 @@ function goToOHCA() {
 }
 
 function renderOHCACheck() {
+  const multi = state.patientCount > 1;
   return `
     <div class="card completed">
       <div class="card-header"><div class="card-title">📋 基本資訊</div></div>
@@ -1228,35 +1258,106 @@ function renderOHCACheck() {
     <div class="card">
       <div class="card-step">步驟 2/4</div>
       <div class="card-title">💔 OHCA 確認</div>
-      <div class="card-desc">是否已無意識呼吸（OHCA）？</div>
+      <div class="card-desc">${multi ? '是否有患者已無意識呼吸（OHCA）？' : '是否已無意識呼吸（OHCA）？'}</div>
       <div class="card-hint">
-        ⚠️ 若患者為 OHCA，將立即派遣雙車，不需進一步評估機轉。
+        ⚠️ 每位 OHCA 患者立即派遣雙車，不需評估機轉${multi ? '；其餘患者仍需逐位評估機轉' : ''}。
       </div>
       <div class="yn-grid">
-        <button class="yn-btn yes-btn" onclick="handleOHCAYes()">
-          ⚠️ 是 OHCA
+        <button class="yn-btn ${state.ohcaAnswer === true ? 'yes-btn selected' : ''}" onclick="selectOHCAAnswer(true)">
+          ⚠️ ${multi ? '有 OHCA' : '是 OHCA'}
         </button>
-        <button class="yn-btn no-btn" onclick="handleOHCANo()">
-          ❌ 否
+        <button class="yn-btn ${state.ohcaAnswer === false ? 'no-btn selected' : ''}" onclick="selectOHCAAnswer(false)">
+          ❌ ${multi ? '沒有' : '否'}
         </button>
+      </div>
+
+      ${state.ohcaAnswer === true && multi ? `
+      <div class="form-group" style="margin-top:16px">
+        <label>💔 其中幾位已為 OHCA？</label>
+        <div class="yn-grid">
+          ${Array.from({ length: state.patientCount }, (_, i) => i + 1).map(n => `
+            <button class="yn-btn ${state.ohcaCount === n ? 'yes-btn selected' : ''}"
+                    onclick="selectOHCACount(${n})">
+              ${n} 人${n === state.patientCount ? '（全部）' : ''}
+            </button>
+          `).join('')}
+        </div>
+      </div>` : ''}
+
+      <div class="action-row" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="confirmOHCA()" ${state.ohcaAnswer === null ? 'disabled style="opacity:.5"' : ''}>
+          確認 →
+        </button>
+        <button class="btn" style="background:var(--gray-200);color:var(--gray-700)" onclick="backToBasic()">← 返回修改人數</button>
       </div>
     </div>
   `;
 }
 
+function selectOHCAAnswer(yes) {
+  state.ohcaAnswer = yes;
+  if (yes) state.ohcaCount = Math.min(state.ohcaCount || 1, state.patientCount);
+  render();
+}
+
+function selectOHCACount(n) {
+  state.ohcaCount = n;
+  render();
+}
+
+function confirmOHCA() {
+  if (state.ohcaAnswer === null) { alert('請先選擇是否有患者為 OHCA'); return; }
+  if (state.ohcaAnswer) handleOHCAYes();
+  else handleOHCANo();
+}
+
+// 返回步驟一重新修改：清掉所有由此衍生的判定，選擇本身保留
+function backToBasic() {
+  Object.assign(state, {
+    step: 'basic',
+    incidentType: '',
+    isOHCA: false,
+    gender: '',
+    age: '',
+    isMajor: false,
+    dispatchLevel: 'normal',
+    vehicles: { ambulance: Math.max(1, state.patientCount), rescue: 0, specialSearch: 0 },
+    findings: [],
+    log: [],
+    subStep: 0,
+    subAnswers: {},
+    currentPatientIdx: 0,
+    firstAssessIdx: 0,
+    patients: [],
+    conscious: null,
+  });
+  render();
+}
+
 function handleOHCAYes() {
+  const ohcaCount = state.patientCount > 1 ? Math.min(state.ohcaCount || 1, state.patientCount) : 1;
+  state.ohcaCount = ohcaCount;
   state.isOHCA = true;
   state.isMajor = true;
   state.dispatchLevel = 'critical';
   state.conscious = false; // OHCA（無呼吸心跳）即為無意識
-  // OHCA: each patient needs 2 ambulances (stacked)
-  state.vehicles.ambulance = Math.max(2, state.patientCount * 2);
-  // Mark all patients as major for OHCA
   if (state.patients.length > 0) {
-    state.patients.forEach(p => { p.isMajor = true; p.conscious = false; });
+    // 只有前 ohcaCount 位標記為 OHCA，其餘傷患之後仍逐位評估機轉
+    state.patients.forEach((p, i) => {
+      if (i < ohcaCount) {
+        p.isMajor = true;
+        p.conscious = false;
+        if (!p.findings.includes('患者 OHCA')) p.findings.push('患者 OHCA');
+      }
+    });
+    if (!state.findings.includes('患者 OHCA')) state.findings.push('患者 OHCA');
+    recalcVehicles(); // OHCA 每位 2 輛 + 其餘每位 1 輛
+    addLog('是否 OHCA', `是，${ohcaCount}/${state.patientCount} 人 → 每位 OHCA 派遣雙車`);
+  } else {
+    state.vehicles.ambulance = 2;
+    addFinding('患者 OHCA');
+    addLog('是否 OHCA', '是 → 立即派遣雙車');
   }
-  addFinding('患者 OHCA');
-  addLog('是否 OHCA', '是 → 立即派遣雙車');
   state.subAnswers.ohcaDetailStep = 0;
   state.step = 'ohca_detail';
   render();
@@ -1296,7 +1397,7 @@ function renderOHCADetail() {
     html += `
       <div class="card">
         <div class="card-step">OHCA 補充資訊 (1/4)</div>
-        <div class="card-title">👤 患者性別？</div>
+        <div class="card-title">👤 ${state.patientCount > 1 ? 'OHCA 患者性別？' : '患者性別？'}</div>
         <div class="choice-grid">
           <button class="choice-btn" onclick="ohcaDetailSelect('gender', '男')">
             <span class="choice-icon">♂️</span>
@@ -1318,7 +1419,7 @@ function renderOHCADetail() {
     html += `
       <div class="card">
         <div class="card-step">OHCA 補充資訊 (2/4)</div>
-        <div class="card-title">🎂 患者年紀？</div>
+        <div class="card-title">🎂 ${state.patientCount > 1 ? 'OHCA 患者年紀？' : '患者年紀？'}</div>
         <div class="card-hint">💡 請輸入年齡或描述（如：老年人、小孩約5歲）</div>
         <div class="form-group">
           <input class="form-input" id="ohcaAgeInput" type="text" placeholder="例如: 45歲、老年、小孩約5歲"
@@ -1405,7 +1506,30 @@ function ohcaDetailHeavyVehicle(yes) {
   } else {
     addLog('是否受困於重型車', '否');
   }
-  state.step = 'summary';
+  finishOHCADetail();
+}
+
+function finishOHCADetail() {
+  if (state.patients.length > 0) {
+    // OHCA 補充資訊記在第一位（A）OHCA 傷患身上
+    state.patients[0].gender = state.gender;
+    state.patients[0].age = state.age;
+  }
+  if (state.patientCount > 1 && state.ohcaCount < state.patientCount) {
+    // 尚有非 OHCA 傷患，續問機轉並逐位評估。
+    // OHCA 設下的全域旗標要先歸零，否則會把接下來評估的傷患誤存為重大外傷；
+    // OHCA 傷患的判定已存於 patients[]，總結時會重新合併。
+    state.firstAssessIdx = state.ohcaCount;
+    state.currentPatientIdx = state.ohcaCount;
+    state.gender = '';
+    state.age = '';
+    state.conscious = null;
+    state.isMajor = false;
+    state.findings = [];
+    state.step = 'incident_type';
+  } else {
+    state.step = 'summary';
+  }
   render();
 }
 
@@ -1457,7 +1581,7 @@ function renderDetailQuestions() {
       state.subStep = currentIdx;
       continue;
     }
-    if (q.scene && state.currentPatientIdx > 0) {
+    if (q.scene && state.currentPatientIdx !== state.firstAssessIdx) {
       currentIdx++;
       state.subStep = currentIdx;
       continue;
@@ -1507,11 +1631,11 @@ function renderDetailQuestions() {
           if (!state.findings.includes(f)) state.findings.push(f);
         });
       });
-      // Restore global isMajor if any patient is major
+      // 先依各傷患自己的旗標算車輛，再把 isMajor 併回全域；
+      // 順序顛倒的話，recalcVehicles 會把最後一位傷患誤判為重大外傷而多派一車
+      recalcVehicles();
       state.isMajor = state.patients.some(p => p.isMajor);
       if (state.isMajor) state.dispatchLevel = 'critical';
-      // Final recalc of stacked vehicles
-      recalcVehicles();
     }
     state.step = 'summary';
     return renderSummary();
@@ -1674,11 +1798,11 @@ function finishEarly() {
         if (!state.findings.includes(f)) state.findings.push(f);
       });
     });
-    // Restore global isMajor if any patient is major
+    // 先依各傷患自己的旗標算車輛，再把 isMajor 併回全域；
+    // 順序顛倒的話，recalcVehicles 會把最後一位傷患誤判為重大外傷而多派一車
+    recalcVehicles();
     state.isMajor = state.patients.some(p => p.isMajor);
     if (state.isMajor) state.dispatchLevel = 'critical';
-    // Final recalc of stacked vehicles
-    recalcVehicles();
   }
   state.step = 'summary';
   render();
@@ -1717,7 +1841,11 @@ function renderSummary() {
 
       <div class="dispatch-result ${state.isMajor ? 'major' : 'normal'}">
         <div class="dr-title">${state.isMajor ? '🚨 判定為重大外傷' : '🟢 非重大外傷'}</div>
-        <div>${state.isOHCA ? 'OHCA 緊急案件' : typeName}</div>
+        <div>${state.isOHCA ?
+          (state.patientCount > 1 ?
+            (state.ohcaCount < state.patientCount ? `其中 ${state.ohcaCount} 人 OHCA ＋ ${typeName}` : `${state.ohcaCount} 人皆 OHCA 緊急案件`) :
+            'OHCA 緊急案件') :
+          typeName}</div>
         <div class="dr-vehicles">${vehicleDesc.join(' ＋ ')}</div>
       </div>
 
@@ -1836,7 +1964,7 @@ function renderSummary() {
 
   // Consciousness: check findings for 無意識 or OHCA (single patient only; multi-patient shown per-patient)
   if (state.isOHCA) {
-    parts.push('OHCA');
+    parts.push(state.patientCount > 1 ? `其中${state.ohcaCount}人OHCA` : 'OHCA');
   } else if (state.patientCount <= 1) {
     const c = state.findings.some(f => f.includes('無意識')) ? false : state.conscious;
     parts.push(consciousnessText(c));
@@ -1866,7 +1994,8 @@ function renderSummary() {
   } else {
     // Gender & Age for single patient
     parts.push(`性別${state.gender || '不詳'}`);
-    parts.push(`年齡${state.age || ''}歲`);
+    // 年齡可能是「45」「45歲」「老年」等描述：純數字才補「歲」，未填顯示「不詳」
+    parts.push(`年齡${state.age ? (/^\d+$/.test(state.age) ? state.age + '歲' : state.age) : '不詳'}`);
     // Key findings (concise)
     state.findings.forEach(f => {
       if (f.includes('無意識')) return;

@@ -1281,6 +1281,27 @@ function renderCrumb(extra) {
 
 function renderDispatchBanner() {
   let level, icon, text;
+  // 步驟一尚未確認前，依目前的選擇即時預覽派遣量
+  if (state.step === 'basic') {
+    const n = Math.max(1, state.patientCount);
+    if (state.ohcaAnswer === true) {
+      const k = Math.min(state.ohcaCount || 1, n);
+      level = 'critical'; icon = '🚨';
+      text = `OHCA ${state.patientCount > 1 ? `${k} 人 ` : ''}— 預計派遣 ${k * 2 + (n - k)} 輛救護車`;
+    } else {
+      level = 'normal'; icon = '🟢';
+      text = `一般派遣 — 預計 ${n} 輛救護車`;
+    }
+    return `
+    <div class="dispatch-banner level-${level}">
+      <span class="icon">${icon}</span>
+      <div class="details">
+        <div class="label">目前派遣建議</div>
+        <div>${text}</div>
+      </div>
+    </div>
+  `;
+  }
   if (state.isOHCA) {
     level = 'critical'; icon = '🚨';
     const ohcaParts = [`${state.vehicles.ambulance} 輛救護車`];
@@ -2272,7 +2293,8 @@ function renderSummary() {
   } else {
     // Gender & Age for single patient
     parts.push(`性別${state.gender || '不詳'}`);
-    parts.push(`年齡${state.age || ''}歲`);
+    // 年齡可能是「45」「45歲」「老年」等描述：純數字才補「歲」，未填顯示「不詳」
+    parts.push(`年齡${state.age ? (/^\d+$/.test(state.age) ? state.age + '歲' : state.age) : '不詳'}`);
     // Key findings (concise)
     state.findings.forEach(f => {
       if (f.includes('無意識')) return;
