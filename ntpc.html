@@ -410,6 +410,24 @@
   .card.completed:hover .card-body { display: block; }
   .card.completed .card-header { cursor: pointer; }
 
+  /* 已完成步驟的麵包屑（取代原本空白的大卡片） */
+  .crumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin-bottom: 12px;
+    padding: 8px 14px;
+    background: var(--success-light);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    font-size: 14px;
+    color: var(--gray-700);
+  }
+  .crumb .ck { color: var(--success); font-weight: 700; }
+  .crumb .sep { color: var(--gray-300); }
+  .crumb b { font-weight: 700; }
+
   /* Plain text summary box */
   .plaintext-box {
     margin-top: 20px;
@@ -649,8 +667,7 @@ const bleedingQuestions = [
     question: '是否為頸部／胸部／腹部穿刺傷？',
     hint: '⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車',
     type: 'yn',
-    // 大出血已判定二車者不再追問；大出血=否者仍要問
-    condition: () => state.subAnswers.bleedMassive !== true,
+    // 勾選清單模式：兩項獨立勾選，不因大出血已勾而隱藏
     onYes: () => {
       addFinding('頸部/胸部/腹部穿刺傷');
       setMajor(); addAmbulance();
@@ -743,7 +760,7 @@ const questionTrees = {
     },
     {
       id: 'veh_type',
-      question: '涉及什麼車輛？',
+      question: '患者當時的身分／搭乘工具？',
       type: 'choice',
       options: [
         { label: '🚗 汽車', value: 'car' },
@@ -758,7 +775,7 @@ const questionTrees = {
     },
     {
       id: 'veh_pedestrian_other_vehicle',
-      question: '對方是什麼車輛？',
+      question: '撞擊患者的是什麼車輛？',
       hint: '若對方為大型車輛且患者受困，需加派特搜車',
       type: 'choice',
       options: [
@@ -777,7 +794,7 @@ const questionTrees = {
       question: '汽車是否整台翻覆？',
       hint: '車輛翻覆為高能量機轉',
       type: 'yn',
-      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      condition: () => !state.subAnswers.vehType || ['car', 'truck'].includes(state.subAnswers.vehType),
       onYes: () => { addFinding('車輛翻覆'); setMajor(); },
       scene: true,
     },
@@ -785,7 +802,7 @@ const questionTrees = {
       id: 'veh_ejected',
       question: '患者是否從車內飛拋出車外？',
       type: 'yn',
-      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      condition: () => !state.subAnswers.vehType || ['car', 'truck'].includes(state.subAnswers.vehType),
       onYes: () => { addFinding('患者從車內飛拋出車外'); setMajor(); addAmbulance(); },
     },
     {
@@ -821,7 +838,7 @@ const questionTrees = {
       id: 'veh_deform',
       question: '患者是否因車輛變形受困車內？',
       type: 'yn',
-      condition: () => ['car', 'truck'].includes(state.subAnswers.vehType),
+      condition: () => !state.subAnswers.vehType || ['car', 'truck'].includes(state.subAnswers.vehType),
       onYes: () => {
         addFinding('車輛變形，患者受困車內');
         setMajor();
@@ -1181,6 +1198,7 @@ function resetAll() {
   if (!confirm('確定要重新開始嗎？所有資料將被清除。')) return;
   Object.assign(state, {
     step: 'basic',
+    _basicCommitted: false,
     patientCount: 1,
     incidentType: '',
     isOHCA: false,
@@ -1214,7 +1232,7 @@ function render() {
   if (state.step === 'detail_questions') state._visible = replayChecks();
 
   // Progress bar
-  const steps = ['basic', 'ohca_check', 'ohca_detail', 'incident_type', 'detail_questions', 'summary'];
+  const steps = ['basic', 'ohca_detail', 'incident_type', 'detail_questions', 'summary'];
   const currentIdx = steps.indexOf(state.step);
   const progress = state.step === 'summary' ? 100 : Math.max(10, ((currentIdx + 1) / steps.length) * 100);
   html += `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>`;
@@ -1225,7 +1243,6 @@ function render() {
   // Step content
   switch (state.step) {
     case 'basic': html += renderBasicInfo(); break;
-    case 'ohca_check': html += renderOHCACheck(); break;
     case 'ohca_detail': html += renderOHCADetail(); break;
     case 'incident_type': html += renderIncidentType(); break;
     case 'detail_questions': html += renderChecklist(); break;
@@ -1239,6 +1256,16 @@ function render() {
   state._lastStep = state.step;
   if (keepScroll) window.scrollTo({ top: y });
   else window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 已完成步驟的麵包屑：一行帶出已確認的答案，取代原本重複出現的空白「基本資訊」卡片
+function renderCrumb(extra) {
+  const items = [`人數 <b>${state.patientCount} 人</b>`];
+  items.push(state.isOHCA ? 'OHCA <b>是</b>' : 'OHCA <b>否</b>');
+  if (extra) items.push(extra);
+  return `<div class="crumb"><span class="ck">✓</span>${
+    items.map(t => `<span>${t}</span>`).join('<span class="sep">›</span>')
+  }</div>`;
 }
 
 function renderDispatchBanner() {
@@ -1274,9 +1301,9 @@ function renderDispatchBanner() {
 function renderBasicInfo() {
   return `
     <div class="card">
-      <div class="card-step">步驟 1/4</div>
+      <div class="card-step">步驟 1/3</div>
       <div class="card-title">📋 基本資訊</div>
-      <div class="card-desc">請先確認案件基本資訊</div>
+      <div class="card-desc">確認人數後，直接判斷是否為 OHCA</div>
 
       <div class="form-group">
         <label>👥 患者總人數</label>
@@ -1293,10 +1320,19 @@ function renderBasicInfo() {
         </div>
       </div>
 
-      <div class="action-row">
-        <button class="btn btn-primary" onclick="goToOHCA()">
-          下一步 →
-        </button>
+      <div class="form-group">
+        <label>💔 是否已無意識呼吸（OHCA）？</label>
+        <div class="card-hint" style="margin-bottom:12px">
+          ⚠️ 若患者為 OHCA，將立即派遣雙車，不需進一步評估機轉。
+        </div>
+        <div class="yn-grid">
+          <button class="yn-btn yes-btn" onclick="handleOHCAYes()">
+            ⚠️ 是 OHCA
+          </button>
+          <button class="yn-btn no-btn" onclick="handleOHCANo()">
+            ❌ 否
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -1310,7 +1346,10 @@ function selectPatientCount(n) {
   render();
 }
 
-function goToOHCA() {
+// 人數確認：由同頁的 OHCA 是／否按鈕觸發，不再是獨立步驟
+function commitBasic() {
+  if (state._basicCommitted) return;
+  state._basicCommitted = true;
   addLog('患者人數', `${state.patientCount} 人`);
   state.vehicles.ambulance = Math.max(state.vehicles.ambulance, state.patientCount);
   if (state.patientCount > 1) {
@@ -1329,39 +1368,10 @@ function goToOHCA() {
       });
     }
   }
-  state.step = 'ohca_check';
-  render();
-}
-
-function renderOHCACheck() {
-  return `
-    <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊</div></div>
-      <div class="card-body">
-        <div class="log-entry"><span class="q">人數</span><span class="a">${state.patientCount} 人</span></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-step">步驟 2/4</div>
-      <div class="card-title">💔 OHCA 確認</div>
-      <div class="card-desc">是否已無意識呼吸（OHCA）？</div>
-      <div class="card-hint">
-        ⚠️ 若患者為 OHCA，將立即派遣雙車，不需進一步評估機轉。
-      </div>
-      <div class="yn-grid">
-        <button class="yn-btn yes-btn" onclick="handleOHCAYes()">
-          ⚠️ 是 OHCA
-        </button>
-        <button class="yn-btn no-btn" onclick="handleOHCANo()">
-          ❌ 否
-        </button>
-      </div>
-    </div>
-  `;
 }
 
 function handleOHCAYes() {
+  commitBasic();
   state.isOHCA = true;
   state.isMajor = true;
   state.dispatchLevel = 'critical';
@@ -1380,6 +1390,7 @@ function handleOHCAYes() {
 }
 
 function handleOHCANo() {
+  commitBasic();
   addLog('是否 OHCA', '否');
   state.step = 'incident_type';
   render();
@@ -1388,11 +1399,7 @@ function handleOHCANo() {
 function renderOHCADetail() {
   const step = state.subAnswers.ohcaDetailStep || 0;
 
-  let html = `
-    <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊 → OHCA 確認 ✓</div></div>
-    </div>
-  `;
+  let html = renderCrumb();
 
   // Show completed answers
   const ohcaLog = state.log.filter(l => ['患者性別', '患者年紀', '是否受困', '是否受困於重型車'].includes(l.q));
@@ -1528,12 +1535,10 @@ function ohcaDetailHeavyVehicle(yes) {
 
 function renderIncidentType() {
   return `
-    <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊 + OHCA 確認</div></div>
-    </div>
+    ${renderCrumb()}
 
     <div class="card">
-      <div class="card-step">步驟 3/4</div>
+      <div class="card-step">步驟 2/3</div>
       <div class="card-title">🔍 事故類型辨識</div>
       <div class="card-desc">辨識為外科後，請選擇受傷機轉類型：</div>
       <div class="choice-grid">
@@ -1784,11 +1789,7 @@ function renderChecklist() {
   const traumas = visible.filter(q => metaOf(q).group === 'trauma');
   const status  = visible.filter(q => metaOf(q).group === 'status');
 
-  let html = `
-    <div class="card completed">
-      <div class="card-header"><div class="card-title">📋 基本資訊 → OHCA 確認 → ${typeName}</div></div>
-    </div>
-  `;
+  let html = renderCrumb(`機轉 <b>${typeName}</b>`);
 
   if (state.patientCount > 1) {
     const label = String.fromCharCode(65 + state.currentPatientIdx);
