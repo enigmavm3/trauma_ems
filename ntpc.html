@@ -722,11 +722,10 @@ const questionTrees = {
     },
     {
       id: 'fall_height_adult',
-      question: '墜落高度是否大於兩層樓（約6公尺）？',
-      hint: '二樓陽台約6公尺，請確認高度',
+      question: '墜落高度是否大於三樓高（約6公尺）？',
       type: 'yn',
       condition: () => !state.subAnswers.isChild,
-      onYes: () => { addFinding('成人墜落高度 > 6公尺（兩層樓）'); setMajor(); addAmbulance(); },
+      onYes: () => { addFinding('成人墜落高度 > 6公尺（三樓高）'); setMajor(); addAmbulance(); },
     },
     {
       id: 'fall_height_child',
@@ -1716,7 +1715,7 @@ const checkMeta = {
   fall_gender:        { group: 'basic' },
   fall_age:           { group: 'basic' },
   fall_is_child:      { group: 'basic', label: '患者為小兒（約 12 歲以下）' },
-  fall_height_adult:  { group: 'trauma', label: '成人墜落高度 > 6 公尺（兩層樓）' },
+  fall_height_adult:  { group: 'trauma', label: '成人墜落高度 > 6 公尺（三樓高）' },
   fall_height_child:  { group: 'trauma', label: '小兒墜落高度 > 3 公尺（兩倍身高）' },
   fall_conscious:     { group: 'status', kind: 'conscious' },
 
