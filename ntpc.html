@@ -1148,7 +1148,7 @@ function vehLabel(v) { return VEH_TYPE_LABELS[v] || v; }
 function vehiclesInvolvedText(vehType, otherVehType) {
   const list = [];
   if (vehType) list.push(vehLabel(vehType));
-  if (otherVehType) list.push('對方' + vehLabel(otherVehType));
+  if (otherVehType) list.push(vehLabel(otherVehType));
   return list.join('、');
 }
 
