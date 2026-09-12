@@ -1141,6 +1141,17 @@ function addAmbulance() {
   recalcVehicles();
 }
 
+// ===== 涉及車輛（總結用）=====
+// 車禍案件要把患者本身的身分／搭乘工具，以及撞擊患者的對方車輛都列進總結
+const VEH_TYPE_LABELS = { car: '汽車', moto: '機車', bike: '自行車', pedestrian: '行人', truck: '大型車輛', unknown: '車種不詳' };
+function vehLabel(v) { return VEH_TYPE_LABELS[v] || v; }
+function vehiclesInvolvedText(vehType, otherVehType) {
+  const list = [];
+  if (vehType) list.push(vehLabel(vehType));
+  if (otherVehType) list.push('對方' + vehLabel(otherVehType));
+  return list.join('、');
+}
+
 // 意識三態 → 顯示文字。true=清醒, false=無意識, null/undefined=意識未知（跳過或未詢問）
 function consciousnessText(c) {
   return c === false ? '無意識' : (c === true ? '清醒' : '意識未知');
@@ -1423,6 +1434,7 @@ function commitBasic() {
         gender: '',
         age: '',
         vehType: '',
+        otherVehType: '',
         conscious: null,
         findings: [],
         isMajor: false,
@@ -2048,6 +2060,7 @@ function finishChecklist() {
       cp.gender = state.gender;
       cp.age = state.age;
       cp.vehType = state.subAnswers.vehType || '';
+      cp.otherVehType = state.subAnswers.otherVehType || '';
       cp.isMajor = state.isMajor;
     }
     state.currentPatientIdx++;
@@ -2078,6 +2091,7 @@ function finishEarly() {
     cp.gender = state.gender;
     cp.age = state.age;
     cp.vehType = state.subAnswers.vehType || '';
+    cp.otherVehType = state.subAnswers.otherVehType || '';
     if (state.isMajor) cp.isMajor = true;
   }
   // Merge all patient findings back into global state for summary
@@ -2117,6 +2131,7 @@ function renderSummary() {
       gender: state.gender,
       age: state.age,
       vehType: state.subAnswers.vehType || '',
+      otherVehType: state.subAnswers.otherVehType || '',
       conscious: hasUnconsciousF ? false : state.conscious,
       findings: [...state.findings],
       isMajor: state.isMajor,
@@ -2146,7 +2161,8 @@ function renderSummary() {
         </div>
         ${state.patientCount > 1 && state.patients.length > 0 ?
           state.patients.map(p => {
-            const vLabel = p.vehType ? ('（' + ({'car':'汽車','moto':'機車','bike':'自行車','pedestrian':'行人','truck':'大型車輛'}[p.vehType] || p.vehType) + '）') : '';
+            const pVehText = vehiclesInvolvedText(p.vehType, p.otherVehType);
+            const vLabel = pVehText ? `（${pVehText}）` : '';
             const consciousLabel = consciousnessBadge(p.conscious);
             const majorLabel = p.isMajor ? ' 🚨重大外傷' : '';
             const pFindings = (p.findings || []).filter(f => !f.includes('無意識'));
@@ -2164,7 +2180,12 @@ function renderSummary() {
           <div class="summary-item">
             <div class="s-label">患者年紀</div>
             <div class="s-value">${state.age || '不詳'}</div>
-          </div>`
+          </div>
+          ${state.incidentType === 'vehicle' ? `
+          <div class="summary-item" style="grid-column: span 2">
+            <div class="s-label">涉及車輛</div>
+            <div class="s-value">${vehiclesInvolvedText(state.subAnswers.vehType, state.subAnswers.otherVehType) || '不詳'}</div>
+          </div>` : ''}`
         }
         <div class="summary-item">
           <div class="s-label">事故類型</div>
@@ -2248,7 +2269,6 @@ function renderSummary() {
   `;
 
   // === Plain text summary for copy/paste (concise one-liner) ===
-  const vehTypeLabels = { 'car': '汽車', 'moto': '機車', 'bike': '自行車', 'pedestrian': '行人', 'truck': '大型車輛' };
   const parts = [];
   parts.push(`受傷人數${state.patientCount}人`);
 
@@ -2264,14 +2284,16 @@ function renderSummary() {
   parts.push(typeName);
 
   // Vehicle type for car accidents (single patient)
-  if (state.incidentType === 'vehicle' && state.patientCount <= 1 && state.subAnswers.vehType) {
-    parts.push(`涉及車輛：${vehTypeLabels[state.subAnswers.vehType] || state.subAnswers.vehType}`);
+  if (state.incidentType === 'vehicle' && state.patientCount <= 1) {
+    const vehText = vehiclesInvolvedText(state.subAnswers.vehType, state.subAnswers.otherVehType);
+    if (vehText) parts.push(`涉及車輛：${vehText}`);
   }
 
   // Per-patient info for multi-patient
   if (state.patientCount > 1 && state.patients.length > 0) {
     state.patients.forEach(p => {
-      const pVeh = (state.incidentType === 'vehicle' && p.vehType) ? `，${vehTypeLabels[p.vehType] || p.vehType}` : '';
+      const pVehText = (state.incidentType === 'vehicle') ? vehiclesInvolvedText(p.vehType, p.otherVehType) : '';
+      const pVeh = pVehText ? `，${pVehText}` : '';
       const consciousText = consciousnessText(p.conscious);
       const pParts = [`${p.label}傷患：${p.gender || '不詳'}，${p.age || '不詳'}${pVeh}，${consciousText}`];
       if (p.findings && p.findings.length > 0) {
