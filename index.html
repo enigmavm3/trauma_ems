@@ -861,10 +861,9 @@ const questionTrees = {
       question: '如有多位患者，是否其中一人已為 OHCA？',
       hint: '若一人OHCA，同車其他患者也應加派二車',
       type: 'yn',
-      // 步驟一已回報 OHCA 時不再重複詢問（避免同一狀況加派兩次）
-      condition: () => state.patientCount > 1 && !state.isOHCA,
+      // 每位受評估的傷患都要判斷（非現場共通題）；步驟一已回報 OHCA 時預設勾選
+      condition: () => state.patientCount > 1,
       onYes: () => { addFinding('同車另一患者為OHCA，本患者加派'); setMajor(); addAmbulance(); },
-      scene: true,
     },
     {
       id: 'veh_conscious',
@@ -1106,12 +1105,6 @@ const questionTrees = {
       question: '患者是否有正常呼吸？',
       type: 'yn',
       onNo: () => { addFinding('呼吸異常'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'other_bleeding',
-      question: '是否有大量出血？',
-      type: 'yn',
-      onYes: () => { addFinding('大量出血'); setMajor(); addAmbulance(); },
     },
   ],
 };
@@ -1742,7 +1735,7 @@ const checkMeta = {
   veh_runover:        { group: 'trauma', label: '患者身體正中間被車輛輾過' },
   veh_under:          { group: 'trauma', label: '患者身體仍壓在車下出不來' },
   veh_deform:         { group: 'trauma', label: '車輛變形，患者受困車內' },
-  veh_multi_ohca:     { group: 'trauma', label: '同車另有一位患者已為 OHCA' },
+  veh_multi_ohca:     { group: 'trauma', label: '同車另有一位患者已為 OHCA', defaultChecked: () => state.isOHCA && state.patientCount > 1 },
   veh_conscious:      { group: 'status', kind: 'conscious' },
 
   // 機器設備
@@ -1781,7 +1774,6 @@ const checkMeta = {
   other_desc:         { group: 'basic' },
   other_conscious:    { group: 'status', kind: 'conscious' },
   other_breathing:    { group: 'status', label: '呼吸異常（沒有正常呼吸）', trigger: 'no' },
-  other_bleeding:     { group: 'trauma', label: '大量出血' },
 };
 
 function metaOf(q) {
@@ -1833,7 +1825,7 @@ function replayChecks() {
       continue;
     }
     if (q.type === 'yn') {
-      const checked = !!state.checks[q.id];
+      const checked = isChecked(q);
       const yesWhenChecked = m.trigger !== 'no';
       const doYes = yesWhenChecked ? checked : !checked;
       if (doYes && q.onYes) q.onYes();
@@ -1842,7 +1834,7 @@ function replayChecks() {
     }
     if (q.type === 'choice') {
       if (m.select) {
-        if (q.onSelect) q.onSelect(state.checks[q.id] ? m.select.on : m.select.off);
+        if (q.onSelect) q.onSelect(isChecked(q) ? m.select.on : m.select.off);
         continue;
       }
       const v = state.choices[q.id];
@@ -1862,7 +1854,7 @@ function replayChecks() {
 
 function checkRow(q) {
   const m = metaOf(q);
-  const checked = !!state.checks[q.id];
+  const checked = isChecked(q);
   const label = m.label || q.question;
   return `
     <label class="chk-row ${checked ? 'checked' : ''}">
@@ -1987,8 +1979,18 @@ function renderChecklist() {
   return html;
 }
 
+// 勾選狀態：使用者動過就以 state.checks 為準，沒動過則採用該項目的預設值
+function isChecked(q) {
+  const v = state.checks[q.id];
+  if (v !== undefined) return !!v;
+  const m = metaOf(q);
+  return typeof m.defaultChecked === 'function' ? !!m.defaultChecked() : false;
+}
+
 function toggleCheck(id) {
-  state.checks[id] = !state.checks[id];
+  const tree = questionTrees[state.incidentType] || questionTrees.other;
+  const q = tree.find(x => x.id === id);
+  state.checks[id] = q ? !isChecked(q) : !state.checks[id];
   render();
 }
 
@@ -2042,11 +2044,11 @@ function logChecklist() {
       } else if (q.type === 'input') {
         addLog(q.question, (state.inputs[q.id] || '').trim() || '未填');
       } else {
-        addLog(m.label || q.question, state.checks[q.id] ? '是' : '否');
+        addLog(m.label || q.question, isChecked(q) ? '是' : '否');
       }
       return;
     }
-    addLog(m.label || q.question, state.checks[q.id] ? '✅ 是' : '否');
+    addLog(m.label || q.question, isChecked(q) ? '✅ 是' : '否');
   });
 }
 
