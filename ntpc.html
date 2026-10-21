@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
 <title>重大外傷派遣決策輔助系統｜新北市政府消防局</title>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XJKV7H7PVD"></script>
@@ -620,7 +621,8 @@ const state = {
   startTime: Date.now(),
   currentPatientIdx: 0,
   patients: [],
-  conscious: null, // 單人意識狀態：true=清醒, false=無意識, null=意識未知（跳過或未詢問）
+  conscious: null, // 單人意識狀態：true=清醒, false=意識不清, null=意識未知（跳過或未詢問）
+  breathing: null, // 單人呼吸狀態：true=正常, false=異常, null=未知
   checks: {},      // 全頁勾選清單：勾選項 id → true
   choices: {},     // 全頁勾選清單：選項題 id → 值
   inputs: {},      // 全頁勾選清單：文字題 id → 值
@@ -650,7 +652,8 @@ function notify(msg) { if (!suppressAlerts) alert(msg); }
 
 // ===== 外觀出血評估（每位傷患都要逐一問，故置於各機轉問題樹之首）=====
 // 流程：外觀大出血（全身都是血／滿地都是血）？ → 是 → 二車（同 OHCA 等級）
-//                                            → 否 → 頸/胸/腹/背穿刺傷？ → 是 → 二車
+//                                            → 否 → 頭/頸/胸/腹/背穿刺傷？ → 是 → 二車
+// 手腕／腳踝以上截肢亦為各機轉共通的重大創傷條件（依作業程序第 8 點）
 // 穿刺傷的追問（湧出血水／器官外露）定義於機器設備與刀傷兩個機轉樹，
 // 以 subAnswers.bleedPenetrating 判斷是否追問。
 const bleedingQuestions = [
@@ -669,17 +672,24 @@ const bleedingQuestions = [
   },
   {
     id: 'bleed_penetrating',
-    question: '是否為頸部／胸部／腹部／背部穿刺傷？',
+    question: '是否為頭部／頸部／胸部／腹部／背部穿刺傷？',
     hint: '⚠️ 這些部位的穿刺傷即使外觀出血不多，仍可能大量內出血 → 派遣二車',
     type: 'yn',
     // 勾選清單模式：兩項獨立勾選，不因大出血已勾而隱藏
     onYes: () => {
       state.subAnswers.bleedPenetrating = true;
-      addFinding('頸部/胸部/腹部/背部穿刺傷');
+      addFinding('頭部/頸部/胸部/腹部/背部穿刺傷');
       setMajor(); addAmbulance();
-      notify('🚨 頸/胸/腹/背穿刺傷 → 派遣二車');
+      notify('🚨 頭/頸/胸/腹/背穿刺傷 → 派遣二車');
     },
     onNo: () => { state.subAnswers.bleedPenetrating = false; },
+  },
+  {
+    id: 'trauma_ampu',
+    question: '是否有肢體被截肢的狀況？（手腕/腳踝以上）',
+    hint: '僅手指、腳趾截肢不算',
+    type: 'yn',
+    onYes: () => { addFinding('手腕/腳踝以上截肢'); setMajor(); addAmbulance(); },
   },
 ];
 
@@ -692,7 +702,8 @@ const questionTrees = {
       question: '患者是否有受困或卡住？需不需要搜救器材？',
       hint: '例如：卡在縫隙中、無法自行脫困等',
       type: 'yn',
-      onYes: () => { addFinding('患者受困，需搜救器材'); addVehicle('rescue'); },
+      // 依作業程序：受困增派救災車組及第 2 台救護車
+      onYes: () => { addFinding('患者受困，需搜救器材'); setMajor(); addAmbulance(); addVehicle('rescue'); },
     },
     {
       id: 'fall_gender',
@@ -734,12 +745,6 @@ const questionTrees = {
       type: 'yn',
       condition: () => state.subAnswers.isChild === true,
       onYes: () => { addFinding('小兒墜落高度 > 3公尺（兩倍身高）'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'fall_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
     },
   ],
 
@@ -865,12 +870,6 @@ const questionTrees = {
       condition: () => state.patientCount > 1,
       onYes: () => { addFinding('同車另一患者為OHCA，本患者加派'); setMajor(); addAmbulance(); },
     },
-    {
-      id: 'veh_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
-    },
   ],
 
   machine: [
@@ -905,6 +904,14 @@ const questionTrees = {
       onYes: () => { addFinding('患者卡在機器中，需搜救/破壞器材'); setMajor(); addAmbulance(); addVehicle('rescue'); },
     },
     {
+      id: 'mach_heavy',
+      question: '是否受困於重型機具？',
+      hint: '依作業程序：受困重型車輛或機具，再額外增派特搜車組',
+      type: 'yn',
+      condition: () => state.findings.includes('患者卡在機器中，需搜救/破壞器材'),
+      onYes: () => { addFinding('受困於重型機具，需加派特搜車'); addVehicle('specialSearch'); },
+    },
+    {
       id: 'mach_gender',
       question: '患者性別？',
       type: 'choice',
@@ -934,19 +941,6 @@ const questionTrees = {
       type: 'yn',
       onYes: () => { addFinding('手腳捲入機器，持續出血'); setMajor(); addAmbulance(); },
     },
-    {
-      id: 'mach_ampu',
-      question: '是否有肢體被截肢的狀況？（手腕/腳踝以上）',
-      hint: '僅手指、腳趾截肢不算',
-      type: 'yn',
-      onYes: () => { addFinding('手腕/腳踝以上截肢'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'mach_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
-    },
   ],
 
   crush: [
@@ -955,7 +949,16 @@ const questionTrees = {
       id: 'crush_trapped',
       question: '患者是否受困？',
       type: 'yn',
-      onYes: () => { addFinding('患者受困'); addVehicle('rescue'); },
+      // 依作業程序：受困增派救災車組及第 2 台救護車
+      onYes: () => { addFinding('患者受困'); setMajor(); addAmbulance(); addVehicle('rescue'); },
+    },
+    {
+      id: 'crush_heavy',
+      question: '是否受困於重型機具？',
+      hint: '依作業程序：受困重型車輛或機具，再額外增派特搜車組',
+      type: 'yn',
+      condition: () => state.findings.includes('患者受困'),
+      onYes: () => { addFinding('受困於重型機具，需加派特搜車'); addVehicle('specialSearch'); },
     },
     {
       id: 'crush_gender',
@@ -1053,24 +1056,18 @@ const questionTrees = {
       onSubmit: (v) => { state.age = v; },
     },
     {
+      id: 'stab_weapon',
+      question: '致傷物種類？',
+      type: 'input',
+      placeholder: '例如：刀、槍、玻璃、鋼筋…',
+      onSubmit: (v) => { addFinding(`致傷物：${v}`); },
+    },
+    {
       id: 'stab_weapon_in',
       question: '凶器是否還插在患者身上？',
       hint: '⚠️ 若是，請告知報案者「不要移除凶器」',
       type: 'yn',
       onYes: () => { addFinding('⚠️ 凶器仍插在患者身上（已提醒勿移除）'); },
-    },
-    {
-      id: 'stab_ampu',
-      question: '是否有肢體被截肢的狀況？（手腕/腳踝以上）',
-      hint: '僅手指、腳趾截肢不算',
-      type: 'yn',
-      onYes: () => { addFinding('手腕/腳踝以上截肢'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'stab_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
     },
   ],
 
@@ -1101,20 +1098,25 @@ const questionTrees = {
       placeholder: '例如: 電擊、動物咬傷...',
       onSubmit: (v) => { addFinding(`傷害描述：${v}`); },
     },
-    {
-      id: 'other_conscious',
-      question: '患者目前是否有意識？',
-      type: 'yn',
-      onNo: () => { addFinding('患者無意識'); setMajor(); addAmbulance(); },
-    },
-    {
-      id: 'other_breathing',
-      question: '患者是否有正常呼吸？',
-      type: 'yn',
-      onNo: () => { addFinding('呼吸異常'); setMajor(); addAmbulance(); },
-    },
   ],
 };
+
+// 意識與呼吸為各機轉共通題，統一放在每個機轉清單最後（區塊三）
+const statusQuestions = [
+  {
+    id: 'conscious',
+    question: '患者是否意識清楚、能正常對答？',
+    type: 'yn',
+    onNo: () => { addFinding('患者意識不清（無法正常對答）'); setMajor(); addAmbulance(); },
+  },
+  {
+    id: 'breathing',
+    question: '患者是否有正常呼吸？',
+    type: 'yn',
+    onNo: () => { addFinding('呼吸異常（沒有正常呼吸）'); setMajor(); addAmbulance(); },
+  },
+];
+Object.keys(questionTrees).forEach(k => questionTrees[k].push(...statusQuestions));
 
 // ===== HELPER FUNCTIONS =====
 function addFinding(f) {
@@ -1123,7 +1125,7 @@ function addFinding(f) {
     const p = state.patients[state.currentPatientIdx];
     if (p && !p.findings.includes(f)) p.findings.push(f);
     // Track consciousness per patient
-    if (f.includes('無意識')) p.conscious = false;
+    if (f.includes('意識不清')) p.conscious = false;
   }
 }
 
@@ -1154,10 +1156,17 @@ function vehiclesInvolvedText(vehType, otherVehType) {
 
 // 意識三態 → 顯示文字。true=清醒, false=無意識, null/undefined=意識未知（跳過或未詢問）
 function consciousnessText(c) {
-  return c === false ? '無意識' : (c === true ? '清醒' : '意識未知');
+  return c === false ? '意識不清' : (c === true ? '清醒' : '意識未知');
 }
 function consciousnessBadge(c) {
-  return c === false ? ' 🔴無意識' : (c === true ? ' 🟢清醒' : ' ⚪意識未知');
+  return c === false ? ' 🔴意識不清' : (c === true ? ' 🟢清醒' : ' ⚪意識未知');
+}
+// 呼吸三態：true=正常, false=異常, null=未知
+function breathingText(b) {
+  return b === false ? '呼吸異常' : (b === true ? '呼吸正常' : '呼吸未知');
+}
+function breathingBadge(b) {
+  return b === false ? ' 🔴呼吸異常' : (b === true ? ' 🟢呼吸正常' : ' ⚪呼吸未知');
 }
 
 function addVehicle(type) {
@@ -1225,6 +1234,7 @@ function resetAll() {
     currentPatientIdx: 0,
     patients: [],
     conscious: null,
+    breathing: null,
     checks: {},
     choices: {},
     inputs: {},
@@ -1436,6 +1446,7 @@ function commitBasic() {
         vehType: '',
         otherVehType: '',
         conscious: null,
+        breathing: null,
         findings: [],
         isMajor: false,
         needRescue: false,
@@ -1451,13 +1462,15 @@ function handleOHCAYes() {
   state.isOHCA = true;
   state.isMajor = true;
   state.dispatchLevel = 'critical';
-  state.conscious = false; // OHCA（無呼吸心跳）即為無意識
+  state.conscious = false; // OHCA（無意識呼吸）
+  state.breathing = false;
   if (state.patients.length > 0) {
     // 只有前 ohcaCount 位標記為 OHCA，其餘傷患之後仍逐位評估機轉
     state.patients.forEach((p, i) => {
       if (i < ohcaCount) {
         p.isMajor = true;
         p.conscious = false;
+        p.breathing = false;
         if (!p.findings.includes('患者 OHCA')) p.findings.push('患者 OHCA');
       }
     });
@@ -1500,6 +1513,7 @@ function backToBasic() {
     firstAssessIdx: 0,
     patients: [],
     conscious: null,
+    breathing: null,
     checks: {},
     choices: {},
     inputs: {},
@@ -1511,6 +1525,7 @@ function renderOHCADetail() {
   const step = state.subAnswers.ohcaDetailStep || 0;
 
   let html = renderCrumb();
+  html += `<div class="card-hint" style="margin-bottom:12px;font-size:15px;font-weight:700;color:var(--danger);">🫀 OHCA：增派第 2 台救護車並立即進行 DACPR</div>`;
 
   // Show completed answers
   const ohcaLog = state.log.filter(l => ['患者性別', '患者年紀', '是否受困', '是否受困於重型車'].includes(l.q));
@@ -1583,8 +1598,8 @@ function renderOHCADetail() {
     html += `
       <div class="card">
         <div class="card-step">OHCA 補充資訊 (4/4)</div>
-        <div class="card-title">🚛 患者是否受困於重型車輛（大貨車、聯結車）？</div>
-        <div class="card-hint">💡 若受困於大貨車或聯結車，需加派特搜車</div>
+        <div class="card-title">🚛 患者是否受困於重型車輛或重型機具？</div>
+        <div class="card-hint">💡 如大貨車、聯結車、怪手、農機具等；受困重型車輛或機具需再額外增派特搜車組</div>
         <div class="yn-grid">
           <button class="yn-btn yes-btn" onclick="ohcaDetailHeavyVehicle(true)">✅ 是</button>
           <button class="yn-btn no-btn" onclick="ohcaDetailHeavyVehicle(false)">❌ 否</button>
@@ -1640,7 +1655,7 @@ function ohcaDetailTrapped(yes) {
 
 function ohcaDetailHeavyVehicle(yes) {
   if (yes) {
-    addFinding('受困於重型車輛（大貨車/聯結車），需加派特搜車');
+    addFinding('受困於重型車輛或重型機具，需加派特搜車');
     addVehicle('specialSearch');
     addLog('是否受困於重型車', '是 → 加派特搜車');
   } else {
@@ -1662,6 +1677,7 @@ function finishOHCADetail() {
     state.gender = '';
     state.age = '';
     state.conscious = null;
+    state.breathing = null;
     state.step = 'incident_type';
   } else {
     state.step = 'summary';
@@ -1718,18 +1734,22 @@ function selectIncidentType(type) {
 //   kind    'conscious'  = 意識三態（清醒／無意識／不詳）
 //   select  原本是選項題，改用勾選：on=勾選時送出的值、off=未勾選時送出的值
 const checkMeta = {
+  // 共同：意識與呼吸（每個機轉都問，依作業程序「確認患者是否有意識及正常呼吸」）
+  conscious:          { group: 'status', kind: 'conscious' },
+  breathing:          { group: 'status', kind: 'breathing' },
+
   // 共同：外觀出血評估
   bleed_massive:      { group: 'trauma', label: '外觀大出血（全身都是血／滿地都是血）' },
-  bleed_penetrating:  { group: 'trauma', label: '頸部／胸部／腹部／背部穿刺傷' },
+  bleed_penetrating:  { group: 'trauma', label: '頭部／頸部／胸部／腹部／背部穿刺傷' },
+  trauma_ampu:        { group: 'trauma', label: '手腕／腳踝以上截肢' },
 
   // 跌落／墜樓
-  fall_trapped:       { group: 'trauma', label: '患者受困或卡住，需搜救器材' },
+  fall_trapped:       { group: 'trauma', label: '患者受困或卡住，需搜救器材（增派救災車組及第 2 台救護車）' },
   fall_gender:        { group: 'basic' },
   fall_age:           { group: 'basic' },
   fall_is_child:      { group: 'basic', label: '患者為小兒（約 12 歲以下）' },
   fall_height_adult:  { group: 'trauma', label: '成人墜落高度 > 6 公尺（落差大於兩層樓）' },
   fall_height_child:  { group: 'trauma', label: '小兒墜落高度 > 3 公尺（兩倍身高）' },
-  fall_conscious:     { group: 'status', kind: 'conscious' },
 
   // 車禍
   veh_gender:         { group: 'basic' },
@@ -1743,22 +1763,21 @@ const checkMeta = {
   veh_under:          { group: 'trauma', label: '患者身體仍壓在車下出不來' },
   veh_deform:         { group: 'trauma', label: '車輛變形，患者受困車內' },
   veh_multi_ohca:     { group: 'trauma', label: '同車另有一位患者已為 OHCA', defaultChecked: () => state.isOHCA && state.patientCount > 1 },
-  veh_conscious:      { group: 'status', kind: 'conscious' },
 
   // 機器設備
   mach_what:          { group: 'basic' },
   mach_gender:        { group: 'basic' },
   mach_age:           { group: 'basic' },
   mach_stuck:         { group: 'trauma', label: '患者仍卡在機器裡，需搜救／破壞器材' },
+  mach_heavy:         { group: 'trauma', label: '受困於重型機具（如農機具、大型工業機台）' },
   mach_rolled:        { group: 'trauma', label: '整個人被捲進機器' },
   mach_limb_stuck:    { group: 'trauma', label: '手腳捲入機器無法脫困且持續出血' },
-  mach_ampu:          { group: 'trauma', label: '手腕／腳踝以上截肢' },
   mach_bleeding:      { group: 'trauma', label: '穿刺傷口持續湧出血水' },
   mach_organs:        { group: 'trauma', label: '傷口可見腸子或其他器官掉出' },
-  mach_conscious:     { group: 'status', kind: 'conscious' },
 
   // 倒塌／重物壓砸／掩埋
-  crush_trapped:      { group: 'trauma', label: '患者受困' },
+  crush_trapped:      { group: 'trauma', label: '患者受困（增派救災車組及第 2 台救護車）' },
+  crush_heavy:        { group: 'trauma', label: '受困於重型機具（如怪手、堆高機、吊車）' },
   crush_gender:       { group: 'basic' },
   crush_age:          { group: 'basic' },
   crush_what:         { group: 'basic' },
@@ -1770,18 +1789,15 @@ const checkMeta = {
   // 刀傷／槍傷
   stab_gender:        { group: 'basic' },
   stab_age:           { group: 'basic' },
+  stab_weapon:        { group: 'basic' },
   stab_weapon_in:     { group: 'trauma', label: '凶器仍插在患者身上' },
-  stab_ampu:          { group: 'trauma', label: '手腕／腳踝以上截肢' },
   stab_bleeding:      { group: 'trauma', label: '傷口持續湧出血水' },
   stab_organs:        { group: 'trauma', label: '傷口可見腸子或其他器官掉出' },
-  stab_conscious:     { group: 'status', kind: 'conscious' },
 
   // 其他外傷
   other_gender:       { group: 'basic' },
   other_age:          { group: 'basic' },
   other_desc:         { group: 'basic' },
-  other_conscious:    { group: 'status', kind: 'conscious' },
-  other_breathing:    { group: 'status', label: '呼吸異常（沒有正常呼吸）', trigger: 'no' },
 };
 
 function metaOf(q) {
@@ -1830,6 +1846,11 @@ function replayChecks() {
     if (m.kind === 'conscious') {
       if (state.conscious === false && q.onNo) q.onNo();
       else if (state.conscious === true && q.onYes) q.onYes();
+      continue;
+    }
+    if (m.kind === 'breathing') {
+      if (state.breathing === false && q.onNo) q.onNo();
+      else if (state.breathing === true && q.onYes) q.onYes();
       continue;
     }
     if (q.type === 'yn') {
@@ -1908,14 +1929,43 @@ function consciousField() {
   const c = state.conscious;
   return `
     <div class="field-row">
-      <label>患者意識狀態</label>
+      <label>患者意識狀態（能否正常對答）</label>
       <div class="chip-row">
         <button class="chip ${c === true ? 'selected' : ''}" onclick="setConscious(true)">🟢 清醒</button>
-        <button class="chip ${c === false ? 'selected danger' : ''}" onclick="setConscious(false)">🔴 無意識</button>
+        <button class="chip ${c === false ? 'selected danger' : ''}" onclick="setConscious(false)">🔴 意識不清（無法正常對答）</button>
         <button class="chip ${(c === null || c === undefined) ? 'selected' : ''}" onclick="setConscious(null)">⚪ 不詳</button>
       </div>
     </div>
   `;
+}
+
+function breathingField() {
+  const b = state.breathing;
+  return `
+    <div class="field-row">
+      <label>患者呼吸狀態</label>
+      <div class="chip-row">
+        <button class="chip ${b === true ? 'selected' : ''}" onclick="setBreathing(true)">🟢 正常呼吸</button>
+        <button class="chip ${b === false ? 'selected danger' : ''}" onclick="setBreathing(false)">🔴 呼吸異常</button>
+        <button class="chip ${(b === null || b === undefined) ? 'selected' : ''}" onclick="setBreathing(null)">⚪ 不詳</button>
+      </div>
+    </div>
+  `;
+}
+
+// 作業程序提醒：車禍、存在安全疑慮或需員警協助 → 轉報 110；OHCA → DACPR
+function sopReminders() {
+  const r = [];
+  if (state.isOHCA) r.push('🫀 OHCA：增派第 2 台救護車並立即進行 DACPR');
+  if (state.incidentType === 'vehicle') r.push('🚓 車禍案件：請轉報 110');
+  else if (state.incidentType === 'stab') r.push('🚓 刀傷／槍傷有安全疑慮：請轉報 110，請員警到場協助');
+  else if (state.incidentType) r.push('🚓 如存在安全疑慮或需員警到場協助：請轉報 110');
+  return r;
+}
+function sopReminderBox() {
+  const r = sopReminders();
+  if (r.length === 0) return '';
+  return `<div class="card-hint" style="margin-bottom:12px;font-size:14px;">${r.map(x => `<div>${x}</div>`).join('')}</div>`;
 }
 
 function renderChecklist() {
@@ -1927,6 +1977,7 @@ function renderChecklist() {
   const status  = visible.filter(q => metaOf(q).group === 'status');
 
   let html = renderCrumb(`機轉 <b>${typeName}</b>`);
+  html += sopReminderBox();
 
   if (state.patientCount > 1) {
     const label = String.fromCharCode(65 + state.currentPatientIdx);
@@ -1961,7 +2012,7 @@ function renderChecklist() {
     <div class="check-card">
       <div class="block-head">區塊三：意識與呼吸狀態</div>
       ${consciousField()}
-      ${status.filter(q => metaOf(q).kind !== 'conscious').map(checkRow).join('')}
+      ${breathingField()}
     </div>
   `;
 
@@ -2019,11 +2070,19 @@ function setConscious(v) {
   render();
 }
 
+function setBreathing(v) {
+  state.breathing = v;
+  const p = currentPatient();
+  if (p) p.breathing = v;
+  render();
+}
+
 function backToIncidentType() {
   state.checks = {};
   state.choices = {};
   state.inputs = {};
   state.conscious = null;
+  state.breathing = null;
   state.gender = '';
   state.age = '';
   state.subAnswers = {};
@@ -2031,7 +2090,7 @@ function backToIncidentType() {
   state.isMajor = false;
   if (!state.isOHCA) state.dispatchLevel = 'normal';
   const p = currentPatient();
-  if (p) { p.findings = []; p.isMajor = false; p.needRescue = false; p.needSpecialSearch = false; p.conscious = null; }
+  if (p) { p.findings = []; p.isMajor = false; p.needRescue = false; p.needSpecialSearch = false; p.conscious = null; p.breathing = null; }
   else { state.vehicles = { ambulance: Math.max(1, state.patientCount), rescue: 0, specialSearch: 0 }; }
   recalcVehicles();
   state.step = 'incident_type';
@@ -2044,6 +2103,7 @@ function logChecklist() {
   visible.forEach(q => {
     const m = metaOf(q);
     if (m.kind === 'conscious') { addLog('患者意識狀態', consciousnessText(state.conscious)); return; }
+    if (m.kind === 'breathing') { addLog('患者呼吸狀態', breathingText(state.breathing)); return; }
     if (m.group === 'basic') {
       if (q.type === 'choice') {
         const v = state.choices[q.id];
@@ -2077,6 +2137,7 @@ function finishChecklist() {
     state.gender = '';
     state.age = '';
     state.conscious = null;
+    state.breathing = null;
     state.subAnswers.vehType = '';
     state.subAnswers.otherVehType = '';
     state.subAnswers.isChild = undefined;
@@ -2135,7 +2196,7 @@ function renderSummary() {
 
   // For single patient, save data to patients array for uniform handling
   if (state.patientCount === 1 && state.patients.length === 0) {
-    const hasUnconsciousF = state.findings.some(f => f.includes('無意識'));
+    const hasUnconsciousF = state.findings.some(f => f.includes('意識不清'));
     state.patients = [{
       label: 'A',
       gender: state.gender,
@@ -2143,6 +2204,7 @@ function renderSummary() {
       vehType: state.subAnswers.vehType || '',
       otherVehType: state.subAnswers.otherVehType || '',
       conscious: hasUnconsciousF ? false : state.conscious,
+      breathing: state.findings.some(f => f.includes('呼吸異常')) ? false : state.breathing,
       findings: [...state.findings],
       isMajor: state.isMajor,
       needRescue: state.vehicles.rescue > 0,
@@ -2163,6 +2225,7 @@ function renderSummary() {
           typeName}</div>
         <div class="dr-vehicles">${vehicleDesc.join(' ＋ ')}</div>
       </div>
+      ${sopReminderBox()}
 
       <div class="summary-grid" style="margin-top:20px">
         <div class="summary-item">
@@ -2173,9 +2236,9 @@ function renderSummary() {
           state.patients.map(p => {
             const pVehText = vehiclesInvolvedText(p.vehType, p.otherVehType);
             const vLabel = pVehText ? `（${pVehText}）` : '';
-            const consciousLabel = consciousnessBadge(p.conscious);
+            const consciousLabel = consciousnessBadge(p.conscious) + '，' + breathingBadge(p.breathing).trim();
             const majorLabel = p.isMajor ? ' 🚨重大外傷' : '';
-            const pFindings = (p.findings || []).filter(f => !f.includes('無意識'));
+            const pFindings = (p.findings || []).filter(f => !f.includes('意識不清') && !f.includes('呼吸異常'));
             const conditionStr = pFindings.length > 0 ? '<br><span style="font-size:13px;color:var(--gray-500)">' + pFindings.join('、') + '</span>' : '';
             return `
             <div class="summary-item" style="grid-column: span 2">
@@ -2286,8 +2349,10 @@ function renderSummary() {
   if (state.isOHCA) {
     parts.push(state.patientCount > 1 ? `其中${state.ohcaCount}人OHCA` : 'OHCA');
   } else if (state.patientCount <= 1) {
-    const c = state.findings.some(f => f.includes('無意識')) ? false : state.conscious;
+    const c = state.findings.some(f => f.includes('意識不清')) ? false : state.conscious;
     parts.push(consciousnessText(c));
+    const b = state.findings.some(f => f.includes('呼吸異常')) ? false : state.breathing;
+    parts.push(breathingText(b));
   }
 
   // Incident type
@@ -2305,10 +2370,10 @@ function renderSummary() {
       const pVehText = (state.incidentType === 'vehicle') ? vehiclesInvolvedText(p.vehType, p.otherVehType) : '';
       const pVeh = pVehText ? `，${pVehText}` : '';
       const consciousText = consciousnessText(p.conscious);
-      const pParts = [`${p.label}傷患：${p.gender || '不詳'}，${p.age || '不詳'}${pVeh}，${consciousText}`];
+      const pParts = [`${p.label}傷患：${p.gender || '不詳'}，${p.age || '不詳'}${pVeh}，${consciousText}，${breathingText(p.breathing)}`];
       if (p.findings && p.findings.length > 0) {
         p.findings.forEach(f => {
-          if (!f.includes('無意識')) pParts.push(f);
+          if (!f.includes('意識不清') && !f.includes('呼吸異常')) pParts.push(f);
         });
       }
       parts.push(pParts.join('，'));
@@ -2320,7 +2385,7 @@ function renderSummary() {
     parts.push(`年齡${state.age ? (/^\d+$/.test(state.age) ? state.age + '歲' : state.age) : '不詳'}`);
     // Key findings (concise)
     state.findings.forEach(f => {
-      if (f.includes('無意識')) return;
+      if (f.includes('意識不清') || f.includes('呼吸異常')) return;
       parts.push(f);
     });
   }
@@ -2380,6 +2445,36 @@ function copyPlainText() {
 
 // ===== INIT =====
 render();
+
+// ===== 自動更新 =====
+// 使用者不一定會「強制重新整理」，瀏覽器可能一直顯示快取的舊版。
+// 開啟頁面時向伺服器抓一次最新版（同時更新瀏覽器快取），內容不同就自動重新載入；
+// 若派遣員已經開始操作，則不打斷，改顯示「有新版本」按鈕。
+(async function checkForUpdate() {
+  if (!/^https?:$/.test(location.protocol)) return;
+  try {
+    const running = await (await fetch(location.href, { cache: 'force-cache' })).text();
+    const latest = await (await fetch(location.pathname, { cache: 'reload' })).text();
+    if (!latest || !running || latest === running) return;
+    let h = 0;
+    for (let i = 0; i < latest.length; i++) h = (h * 31 + latest.charCodeAt(i)) | 0;
+    const key = 'autoUpdated:' + h;
+    let already = false;
+    try { already = !!sessionStorage.getItem(key); sessionStorage.setItem(key, '1'); } catch (e) {}
+    if (already) return;
+    const untouched = state.step === 'basic' && !state._basicCommitted && state.log.length === 0;
+    if (untouched) { location.reload(); return; }
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:200;background:#1a56db;color:#fff;padding:12px 16px;border-radius:10px;box-shadow:0 6px 16px rgba(0,0,0,.25);display:flex;gap:12px;align-items:center;justify-content:space-between;font-size:15px;';
+    bar.innerHTML = '<span>🔄 有新版本可用（本案件完成後再更新即可）</span>';
+    const btn = document.createElement('button');
+    btn.textContent = '立即更新';
+    btn.style.cssText = 'background:#fff;color:#1a56db;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:14px;cursor:pointer;';
+    btn.onclick = () => { if (confirm('更新會清除目前輸入的資料，確定要更新嗎？')) location.reload(); };
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+  } catch (e) { /* 離線或抓取失敗：維持現有版本 */ }
+})();
 </script>
 
 </body>
